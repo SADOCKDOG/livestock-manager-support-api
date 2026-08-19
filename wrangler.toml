@@ -1,0 +1,22 @@
+name = "livestock-manager-support-api"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[kv_namespaces]]
+binding = "TICKETS_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+GITHUB_REPO_OWNER = "SADOCKDOG"
+GITHUB_REPO_NAME = "livestock-manager-support-tickets"
+MAX_TICKETS_PER_DAY = "5"
+
+# Secretos (no van aquí, se configuran con: wrangler secret put <NOMBRE>)
+# GITHUB_APP_ID
+# GITHUB_APP_PRIVATE_KEY
+# GITHUB_APP_INSTALLATION_ID
+# GITHUB_WEBHOOK_SECRET
+# AI_API_KEY
+# GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
+# JWT_SECRET
