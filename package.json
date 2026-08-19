@@ -1,0 +1,32 @@
+{
+  "name": "livestock-manager-support-api",
+  "version": "0.1.0",
+  "description": "Backend de soporte con IA para Livestock Manager — estructura incidencias y crea issues en GitHub vía GitHub App.",
+  "main": "src/index.ts",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "kv:create": "wrangler kv:namespace create TICKETS_KV",
+    "secret:put": "wrangler secret put",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260101.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^3.90.0",
+    "eslint": "^9.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.10.0",
+    "@typescript-eslint/parser": "^8.10.0",
+    "prettier": "^3.3.0"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "jose": "^5.9.0",
+    "@octokit/auth-app": "^7.1.0",
+    "@octokit/rest": "^21.0.0"
+  }
+}
