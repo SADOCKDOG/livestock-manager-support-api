@@ -14,8 +14,12 @@ import { SignJWT, importPKCS8 } from 'jose';
 /** Id del producto en Play Console. Debe coincidir exactamente. */
 export const PRODUCTO_SOPORTE = 'support_unlock';
 
-/** true = suscripcion mensual; false = compra unica. Ver seccion 11 del doc. */
-export const SOPORTE_ES_SUSCRIPCION = false;
+/**
+ * Suscripcion, no compra unica: el soporte tiene coste recurrente (cada ticket
+ * gasta IA), asi que el ingreso tambien debe serlo. Con compra unica un pago
+ * de una vez daria derecho a soporte indefinido.
+ */
+export const SOPORTE_ES_SUSCRIPCION = true;
 
 const AMBITO = 'https://www.googleapis.com/auth/androidpublisher';
 const URL_TOKEN = 'https://oauth2.googleapis.com/token';
