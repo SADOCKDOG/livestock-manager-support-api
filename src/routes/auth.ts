@@ -1,0 +1,148 @@
+/**
+ * Identidad y licencia.
+ *
+ *   POST /auth/verify-purchase  -> el cliente manda su purchase_token; aqui se
+ *                                  valida contra Google Play y se emite la sesion.
+ *   GET  /auth/me               -> estado de la licencia del usuario en sesion.
+ *
+ * PENDIENTE DE DEFINIR (doc, seccion 11): el proveedor de identidad. De momento
+ * la identidad va anclada a la compra, que es lo unico verificable server-side
+ * sin montar login. Cuando se decida (Google Sign-In o email+OTP), se anade
+ * aqui el endpoint correspondiente y se conserva `emitirSesion`.
+ */
+
+import { Hono } from 'hono';
+import { SignJWT } from 'jose';
+import { verificarLicenciaAndroid } from '../services/playBilling';
+import { Almacen } from '../services/storage';
+import { requiereSesion } from '../middleware/auth';
+import type { Env, Plataforma, Usuario, Variables } from '../types';
+
+const rutas = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+/** applicationId de la app Android. Debe coincidir con el de Play Console. */
+const PAQUETE_ANDROID = 'com.livestockmanager.app.manual';
+
+/** Duracion de la sesion. Corta a proposito: se renueva revalidando la compra. */
+const HORAS_SESION = 24;
+
+const codificador = new TextEncoder();
+
+async function emitirSesion(
+  secreto: string,
+  usuario: Usuario,
+): Promise<{ token: string; expira: string }> {
+  const expiraEn = new Date(Date.now() + HORAS_SESION * 3600 * 1000);
+  const token = await new SignJWT({
+    email: usuario.email,
+    plataforma: usuario.plataforma,
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setSubject(usuario.user_id)
+    .setIssuedAt()
+    .setExpirationTime(expiraEn)
+    .sign(codificador.encode(secreto));
+  return { token, expira: expiraEn.toISOString() };
+}
+
+/**
+ * Valida la compra y devuelve la sesion.
+ *
+ * Se llama tras comprar y en cada arranque de la app: asi una licencia
+ * cancelada o reembolsada deja de dar acceso en menos de 24 horas.
+ */
+rutas.post('/verify-purchase', async (c) => {
+  const cuerpo = await c.req.json().catch(() => null);
+  const purchaseToken = cuerpo?.purchase_token;
+  const plataforma: Plataforma = cuerpo?.plataforma === 'web' ? 'web' : 'android';
+  const email = typeof cuerpo?.email === 'string' ? cuerpo.email.trim().toLowerCase() : '';
+
+  if (typeof purchaseToken !== 'string' || purchaseToken.length < 10) {
+    return c.json({ error: 'Falta el token de compra' }, 400);
+  }
+
+  if (plataforma === 'web') {
+    // PENDIENTE: pago web para la PWA (Stripe u otro). Hasta que se decida el
+    // proveedor no se puede verificar nada server-side, y sin verificacion no
+    // se concede licencia: preferible negar que regalar el producto de pago.
+    return c.json(
+      {
+        error: 'El pago web todavia no esta disponible',
+        codigo: 'PAGO_WEB_NO_CONFIGURADO',
+      },
+      501,
+    );
+  }
+
+  let resultado;
+  try {
+    resultado = await verificarLicenciaAndroid(
+      c.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON,
+      PAQUETE_ANDROID,
+      purchaseToken,
+    );
+  } catch (e) {
+    console.error('[auth] fallo la verificacion con Google Play:', e);
+    return c.json({ error: 'No se pudo verificar la compra ahora mismo' }, 502);
+  }
+
+  if (!resultado.activa) {
+    return c.json(
+      { error: resultado.motivo ?? 'La compra no es valida', codigo: 'COMPRA_NO_VALIDA' },
+      403,
+    );
+  }
+
+  // La identidad se ancla al token de compra: es estable y lo emite Google.
+  const almacen = new Almacen(c.env.TICKETS_KV);
+  const userId = await hashUserId(purchaseToken);
+  const existente = await almacen.obtenerUsuario(userId);
+
+  const usuario: Usuario = {
+    user_id: userId,
+    email: email || existente?.email || '',
+    plataforma,
+    purchase_token: purchaseToken,
+    licencia_soporte_activa: true,
+    licencia_expira: resultado.expira,
+  };
+  await almacen.guardarUsuario(usuario);
+
+  const sesion = await emitirSesion(c.env.JWT_SECRET, usuario);
+  return c.json({
+    ...sesion,
+    licencia: { activa: true, expira: resultado.expira },
+  });
+});
+
+/** Estado actual de la licencia, para que la app decida que mostrar. */
+rutas.get('/me', requiereSesion, async (c) => {
+  const usuario = c.get('usuario');
+  const caducada = usuario.licencia_expira
+    ? Date.parse(usuario.licencia_expira) < Date.now()
+    : false;
+  return c.json({
+    user_id: usuario.user_id,
+    email: usuario.email,
+    plataforma: usuario.plataforma,
+    licencia: {
+      activa: usuario.licencia_soporte_activa && !caducada,
+      expira: usuario.licencia_expira,
+    },
+  });
+});
+
+/**
+ * user_id derivado del purchase_token. Se hashea para no usar el token de
+ * compra como identificador en claro por todo el almacenamiento.
+ */
+async function hashUserId(purchaseToken: string): Promise<string> {
+  const datos = codificador.encode(`usuario:${purchaseToken}`);
+  const digest = await crypto.subtle.digest('SHA-256', datos);
+  return Array.from(new Uint8Array(digest))
+    .slice(0, 16)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+export default rutas;
