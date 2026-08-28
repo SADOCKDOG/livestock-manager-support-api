@@ -30,6 +30,16 @@ interface CuentaServicio {
   private_key: string;
 }
 
+/**
+ * Mensaje de error de Google, recortado. No lleva secretos: es la explicacion
+ * que devuelve la propia API, y sin ella el codigo HTTP a secas obliga a
+ * adivinar cual de las varias causas posibles es.
+ */
+async function detalle(respuesta: Response): Promise<string> {
+  const texto = await respuesta.text().catch(() => '');
+  return texto ? texto.slice(0, 300) : 'sin cuerpo';
+}
+
 let tokenCacheado: { token: string; expira: number } | null = null;
 
 /** Access token OAuth2 mediante JWT firmado con la cuenta de servicio. */
@@ -79,7 +89,9 @@ async function tokenDeAcceso(cuentaJSON: string): Promise<string> {
     }),
   });
   if (!respuesta.ok) {
-    throw new Error(`Google rechazo la autenticacion (${respuesta.status})`);
+    throw new Error(
+      `Google rechazo la autenticacion (${respuesta.status}): ${await detalle(respuesta)}`,
+    );
   }
   const datos = (await respuesta.json()) as { access_token: string; expires_in: number };
   tokenCacheado = {
@@ -118,7 +130,13 @@ export async function verificarLicenciaAndroid(
     return { activa: false, expira: null, motivo: 'La compra no existe' };
   }
   if (!respuesta.ok) {
-    throw new Error(`Google Play respondio ${respuesta.status}`);
+    // El codigo solo no basta para saber que hacer: un 401 aqui casi siempre es
+    // que la cuenta de servicio no esta invitada en Play Console, y un 403 que
+    // la Google Play Android Developer API no esta habilitada en el proyecto de
+    // Cloud. Google lo explica en el cuerpo, asi que se propaga.
+    throw new Error(
+      `Google Play respondio ${respuesta.status}: ${await detalle(respuesta)}`,
+    );
   }
 
   if (SOPORTE_ES_SUSCRIPCION) {
