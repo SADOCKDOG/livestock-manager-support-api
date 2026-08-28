@@ -37,7 +37,25 @@ async function tokenDeAcceso(cuentaJSON: string): Promise<string> {
   if (tokenCacheado && tokenCacheado.expira > Date.now() + 60_000) {
     return tokenCacheado.token;
   }
-  const cuenta = JSON.parse(cuentaJSON) as CuentaServicio;
+  let cuenta: CuentaServicio;
+  try {
+    cuenta = JSON.parse(cuentaJSON) as CuentaServicio;
+  } catch {
+    throw new Error(
+      'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON no es JSON valido: debe ser el fichero '
+        + 'completo de la cuenta de servicio descargado de Google Cloud.',
+    );
+  }
+  // Sin esta comprobacion el fallo sale como un TypeError opaco ("reading
+  // includes") que no delata que el secreto este mal cargado. Paso el
+  // 2026-08-28: el secreto existia, pero sin private_key dentro.
+  if (!cuenta || !cuenta.private_key || !cuenta.client_email) {
+    throw new Error(
+      'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON incompleto: faltan private_key o '
+        + 'client_email. Recargalo con: wrangler secret put '
+        + 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON --env production',
+    );
+  }
   const clavePEM = cuenta.private_key.includes('\\n')
     ? cuenta.private_key.replace(/\\n/g, '\n')
     : cuenta.private_key;
