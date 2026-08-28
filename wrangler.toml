@@ -3,20 +3,24 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-[[kv_namespaces]]
-binding = "TICKETS_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-
+# Variables publicas. Los SECRETOS nunca van aqui: se cargan con
+# `wrangler secret put <NOMBRE> --env production`. Una var vacia del mismo
+# nombre pisaria al secreto (fue la causa del incidente del 2026-08-28).
 [vars]
 GITHUB_REPO_OWNER = "SADOCKDOG"
 GITHUB_REPO_NAME = "livestock-manager-support-tickets"
 MAX_TICKETS_PER_DAY = "5"
 
-# Secretos (no van aquí, se configuran con: wrangler secret put <NOMBRE>)
-# GITHUB_APP_ID
-# GITHUB_APP_PRIVATE_KEY
-# GITHUB_APP_INSTALLATION_ID
-# GITHUB_WEBHOOK_SECRET
-# AI_API_KEY
-# GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
-# JWT_SECRET
+[[kv_namespaces]]
+binding = "TICKETS_KV"
+id = "4fd0fd1738244c4799628b32b9ce1487"
+
+# Produccion. Wrangler no hereda vars ni bindings por entorno: se repiten.
+[env.production.vars]
+GITHUB_REPO_OWNER = "SADOCKDOG"
+GITHUB_REPO_NAME = "livestock-manager-support-tickets"
+MAX_TICKETS_PER_DAY = "5"
+
+[[env.production.kv_namespaces]]
+binding = "TICKETS_KV"
+id = "4fd0fd1738244c4799628b32b9ce1487"
