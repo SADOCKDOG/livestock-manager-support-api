@@ -36,7 +36,9 @@ id = "4fd0fd1738244c4799628b32b9ce1487"
 [observability]
 enabled = false
 head_sampling_rate = 1
-redact_query_string = false
+# `redact_query_string` existe en el panel pero no en el esquema de
+# wrangler.toml, que avisa de campo inesperado. Se omite: su valor es
+# `false`, que ya es el de por defecto, asi que no se pierde nada.
 
 [observability.logs]
 enabled = true
@@ -52,7 +54,9 @@ head_sampling_rate = 1
 [env.production.observability]
 enabled = false
 head_sampling_rate = 1
-redact_query_string = false
+# `redact_query_string` existe en el panel pero no en el esquema de
+# wrangler.toml, que avisa de campo inesperado. Se omite: su valor es
+# `false`, que ya es el de por defecto, asi que no se pierde nada.
 
 [env.production.observability.logs]
 enabled = true
