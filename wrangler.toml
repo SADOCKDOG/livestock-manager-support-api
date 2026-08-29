@@ -25,14 +25,42 @@ MAX_TICKETS_PER_DAY = "5"
 binding = "TICKETS_KV"
 id = "4fd0fd1738244c4799628b32b9ce1487"
 
-# Logs del Worker. Activado desde el panel el 2026-08-29; se refleja aqui
-# porque un `wrangler deploy` sin este bloque volveria a apagarlos, y sin logs
-# los fallos del backend solo se ven teniendo un `wrangler tail` abierto justo
-# en el momento. Wrangler no hereda esta clave por entorno: se repite.
+# Observabilidad. Activada desde el panel el 2026-08-29 y reflejada aqui porque
+# un `wrangler deploy` sin este bloque la volveria a apagar, y sin logs los
+# fallos del backend solo se ven teniendo un `wrangler tail` abierto justo en el
+# momento. Wrangler no hereda esta clave por entorno: se repite.
+#
+# `observability.enabled = false` con `logs.enabled = true` es lo que muestra el
+# panel: la clave de arriba es la del sistema antiguo y la que manda ahora es la
+# de `logs`. Se copia tal cual para que el fichero y el panel digan lo mismo.
+[observability]
+enabled = false
+head_sampling_rate = 1
+redact_query_string = false
+
 [observability.logs]
 enabled = true
+head_sampling_rate = 1
+persist = true
 invocation_logs = true
+
+[observability.traces]
+enabled = true
+persist = true
+head_sampling_rate = 1
+
+[env.production.observability]
+enabled = false
+head_sampling_rate = 1
+redact_query_string = false
 
 [env.production.observability.logs]
 enabled = true
+head_sampling_rate = 1
+persist = true
 invocation_logs = true
+
+[env.production.observability.traces]
+enabled = true
+persist = true
+head_sampling_rate = 1

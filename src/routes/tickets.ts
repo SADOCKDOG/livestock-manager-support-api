@@ -19,6 +19,7 @@ import { requiereLicencia, requiereSesion } from '../middleware/auth';
 import { limitarTickets } from '../middleware/rateLimit';
 import { bloqueContexto, limpiarPasos, limpiarTexto, limpiarTitulo, LIMITES } from '../utils/sanitize';
 import type { ContextoApp, Env, Severidad, Ticket, Variables } from '../types';
+import { detalleError } from '../utils/errores';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -141,7 +142,7 @@ rutas.post('/confirm', requiereSesion, requiereLicencia, limitarTickets, async (
       severidad,
     });
   } catch (e) {
-    console.error('[tickets] fallo al crear el issue:', e);
+    console.error('[tickets] fallo al crear el issue:', detalleError(e));
     return c.json({ error: 'No se pudo registrar la incidencia. Intentalo de nuevo.' }, 502);
   }
 

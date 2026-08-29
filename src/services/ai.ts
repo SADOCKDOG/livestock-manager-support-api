@@ -12,6 +12,7 @@
 
 import type { BorradorTicket, ContextoApp, Severidad } from '../types';
 import { limpiarPasos, limpiarTexto, limpiarTitulo, LIMITES } from '../utils/sanitize';
+import { detalleError } from '../utils/errores';
 
 const MODELO = 'claude-sonnet-4-5';
 const URL_PROVEEDOR = 'https://api.anthropic.com/v1/messages';
@@ -59,7 +60,17 @@ async function llamarProveedor(apiKey: string, mensaje: string): Promise<string>
   });
 
   if (!respuesta.ok) {
-    throw new Error(`El proveedor de IA respondio ${respuesta.status}`);
+    // El codigo HTTP solo no distingue una clave invalida (401) de una sin
+    // saldo (400) o de un limite de uso (429), y el borrador de reserva tapa
+    // el fallo: el usuario recibe un ticket pobre y nadie se entera de por que.
+    // Se recorta el cuerpo porque puede venir con eco de la peticion.
+    let detalle = '';
+    try {
+      detalle = (await respuesta.text()).slice(0, 300);
+    } catch {
+      detalle = '(sin cuerpo)';
+    }
+    throw new Error(`El proveedor de IA respondio ${respuesta.status}: ${detalle}`);
   }
   const datos = (await respuesta.json()) as RespuestaProveedor;
   const texto = datos.content?.find((c) => c.type === 'text')?.text;
@@ -110,7 +121,7 @@ export async function estructurarReporte(
   try {
     bruto = extraerJSON(await llamarProveedor(apiKey, mensaje));
   } catch (e) {
-    console.warn('[ai] fallo la estructuracion, se usa el borrador de reserva:', e);
+    console.warn('[ai] fallo la estructuracion, se usa el borrador de reserva:', detalleError(e));
     return borradorDeReserva(ticketId, descripcionUsuario);
   }
 

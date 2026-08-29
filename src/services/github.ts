@@ -19,12 +19,77 @@ const UA = 'livestock-manager-support-api';
 /** Cache del installation token en memoria del isolate (expira a la hora). */
 let tokenCacheado: { token: string; expira: number } | null = null;
 
+/** Longitud en formato DER: corta si cabe en un byte, larga si no. */
+function longitudDER(n: number): number[] {
+  if (n < 0x80) return [n];
+  const bytes: number[] = [];
+  for (let v = n; v > 0; v >>>= 8) bytes.unshift(v & 0xff);
+  return [0x80 | bytes.length, ...bytes];
+}
+
 /**
- * La clave privada de la App llega como secreto, con los saltos de linea
- * escapados si se pego en la consola de Cloudflare.
+ * Envuelve un RSAPrivateKey (PKCS#1) en un PrivateKeyInfo (PKCS#8).
+ *
+ * Es puro empaquetado ASN.1: la clave no se toca, solo se le antepone la
+ * cabecera que declara «esto es RSA». Los 15 bytes fijos son el
+ * AlgorithmIdentifier de rsaEncryption (OID 1.2.840.113549.1.1.1 + NULL).
+ */
+function pkcs1APkcs8(der: Uint8Array): Uint8Array {
+  const algoritmo = [
+    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
+    0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
+  ];
+  const octetString = [0x04, ...longitudDER(der.length)];
+  const version = [0x02, 0x01, 0x00];
+  const cuerpo = version.length + algoritmo.length + octetString.length + der.length;
+  const cabecera = [0x30, ...longitudDER(cuerpo), ...version, ...algoritmo, ...octetString];
+
+  const salida = new Uint8Array(cabecera.length + der.length);
+  salida.set(cabecera, 0);
+  salida.set(der, cabecera.length);
+  return salida;
+}
+
+/** DER -> PEM en lineas de 64 columnas, que es lo que espera cualquier parser. */
+function aPEM(der: Uint8Array, etiqueta: string): string {
+  let binario = '';
+  for (const b of der) binario += String.fromCharCode(b);
+  const b64 = (btoa(binario).match(/.{1,64}/g) ?? []).join('\n');
+  return '-----BEGIN ' + etiqueta + '-----\n' + b64 + '\n-----END ' + etiqueta + '-----\n';
+}
+
+/**
+ * Deja la clave privada de la App en PKCS#8, el unico formato que acepta
+ * `importPKCS8`.
+ *
+ * GitHub entrega las claves de las Apps en PKCS#1 («BEGIN RSA PRIVATE KEY»).
+ * Pasarsela tal cual a jose lanzaba un TypeError seco que el catch de
+ * `/tickets/confirm` convertia en un 502 generico: el usuario veia «no se pudo
+ * registrar la incidencia» y en el log solo quedaba un stack sin mensaje. Por
+ * esto no se llego a crear ni un solo issue.
+ *
+ * Tambien se deshacen los saltos de linea escapados, que es como queda el
+ * secreto si se pega en la consola de Cloudflare en vez de darlo por stdin.
  */
 function normalizarClave(clave: string): string {
-  return clave.includes('\\n') ? clave.replace(/\\n/g, '\n') : clave;
+  const limpia = (clave.includes('\n') ? clave.replace(/\n/g, '\n') : clave).trim();
+
+  if (limpia.startsWith('-----BEGIN PRIVATE KEY-----')) return limpia;
+
+  if (limpia.startsWith('-----BEGIN RSA PRIVATE KEY-----')) {
+    const b64 = limpia.replace(/-----(BEGIN|END) RSA PRIVATE KEY-----/g, '').replace(/\s/g, '');
+    const binario = atob(b64);
+    const der = new Uint8Array(binario.length);
+    for (let i = 0; i < binario.length; i++) der[i] = binario.charCodeAt(i);
+    return aPEM(pkcs1APkcs8(der), 'PRIVATE KEY');
+  }
+
+  // Ni PKCS#8 ni PKCS#1. Se dice que cabecera trae, nunca el contenido.
+  const corte = limpia.indexOf('\n');
+  throw new Error(
+    'GITHUB_APP_PRIVATE_KEY no parece una clave PEM. Empieza por: ' +
+      JSON.stringify(limpia.slice(0, corte === -1 ? 40 : corte))
+  );
 }
 
 /** JWT firmado con la clave privada de la App (valido 10 min como maximo). */
