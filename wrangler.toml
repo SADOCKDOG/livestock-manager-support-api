@@ -24,3 +24,15 @@ MAX_TICKETS_PER_DAY = "5"
 [[env.production.kv_namespaces]]
 binding = "TICKETS_KV"
 id = "4fd0fd1738244c4799628b32b9ce1487"
+
+# Logs del Worker. Activado desde el panel el 2026-08-29; se refleja aqui
+# porque un `wrangler deploy` sin este bloque volveria a apagarlos, y sin logs
+# los fallos del backend solo se ven teniendo un `wrangler tail` abierto justo
+# en el momento. Wrangler no hereda esta clave por entorno: se repite.
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+[env.production.observability.logs]
+enabled = true
+invocation_logs = true
