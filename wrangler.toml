@@ -11,6 +11,10 @@ GITHUB_REPO_OWNER = "SADOCKDOG"
 GITHUB_REPO_NAME = "livestock-manager-support-tickets"
 MAX_TICKETS_PER_DAY = "5"
 
+# Workers AI: inferencia dentro de Cloudflare, sin clave ni saldo.
+[ai]
+binding = "AI"
+
 [[kv_namespaces]]
 binding = "TICKETS_KV"
 id = "4fd0fd1738244c4799628b32b9ce1487"
@@ -20,6 +24,10 @@ id = "4fd0fd1738244c4799628b32b9ce1487"
 GITHUB_REPO_OWNER = "SADOCKDOG"
 GITHUB_REPO_NAME = "livestock-manager-support-tickets"
 MAX_TICKETS_PER_DAY = "5"
+
+# Workers AI tambien aqui: los bindings no se heredan por entorno.
+[env.production.ai]
+binding = "AI"
 
 [[env.production.kv_namespaces]]
 binding = "TICKETS_KV"

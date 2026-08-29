@@ -82,7 +82,7 @@ rutas.post('/', requiereSesion, requiereLicencia, limitarTickets, async (c) => {
   };
 
   const borrador = await estructurarReporte(
-    c.env.AI_API_KEY,
+    c.env.AI,
     ticketId,
     descripcion,
     contexto,
@@ -187,14 +187,24 @@ rutas.get('/', requiereSesion, async (c) => {
   const almacen = new Almacen(c.env.TICKETS_KV);
   const tickets = await almacen.listarTicketsDeUsuario(usuario.user_id);
   return c.json({
-    tickets: tickets.map((t) => ({
-      ticket_id: t.ticket_id,
-      titulo: t.titulo,
-      estado: t.estado,
-      severidad: t.severidad,
-      created_at: t.created_at,
-      updated_at: t.updated_at,
-    })),
+    tickets: tickets.map((t) => {
+      const respuestas = t.respuestas ?? [];
+      const ultima = respuestas[respuestas.length - 1];
+      return {
+        ticket_id: t.ticket_id,
+        titulo: t.titulo,
+        estado: t.estado,
+        severidad: t.severidad,
+        created_at: t.created_at,
+        updated_at: t.updated_at,
+        cerrada_at: t.cerrada_at ?? null,
+        // El listado no manda el texto de las respuestas, solo cuantas hay y
+        // la fecha de la ultima: con eso la app marca las no leidas sin
+        // arrastrar el hilo entero de cada incidencia en cada carga.
+        respuestas: respuestas.length,
+        ultima_respuesta_at: ultima ? ultima.fecha : null,
+      };
+    }),
   });
 });
 
@@ -218,6 +228,10 @@ rutas.get('/:id', requiereSesion, async (c) => {
     severidad: ticket.severidad,
     created_at: ticket.created_at,
     updated_at: ticket.updated_at,
+    cerrada_at: ticket.cerrada_at ?? null,
+    // Aqui si va el hilo completo: es la pantalla donde el usuario lee lo que
+    // le ha contestado el equipo.
+    respuestas: ticket.respuestas ?? [],
   });
 });
 

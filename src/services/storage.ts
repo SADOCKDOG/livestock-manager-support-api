@@ -4,7 +4,7 @@
  * Claves:
  *   usuario:<user_id>         -> Usuario
  *   email:<email>             -> user_id            (para el login)
- *   ticket:<ticket_id>        -> Ticket
+ *   ticket:<ticket_id>        -> Ticket (incluye las respuestas del equipo)
  *   issue:<numero>            -> ticket_id          (para el webhook)
  *   tickets-usuario:<user_id> -> string[] (ticket_id, mas reciente primero)
  *   borrador:<ticket_id>      -> BorradorTicket     (TTL corto)
@@ -15,7 +15,13 @@
  * importar, el contador deberia moverse a Durable Objects o D1.
  */
 
-import type { BorradorTicket, EstadoTicket, Ticket, Usuario } from '../types';
+import type {
+  BorradorTicket,
+  EstadoTicket,
+  RespuestaTicket,
+  Ticket,
+  Usuario,
+} from '../types';
 
 /** El borrador solo tiene que sobrevivir a la confirmacion del usuario. */
 const TTL_BORRADOR_SEGUNDOS = 60 * 30;
@@ -86,16 +92,44 @@ export class Almacen {
     return tickets.filter((t): t is Ticket => t !== null);
   }
 
-  /** Lo usa el webhook: de numero de issue a ticket interno. */
-  async actualizarEstadoPorIssue(
+  /**
+   * Lo usa el webhook: aplica a un ticket lo que ha pasado en su issue.
+   *
+   * Estado y respuesta llegan juntos porque un mismo evento suele traer las
+   * dos cosas (comentar mueve la incidencia a «en revision»), y separarlo en
+   * dos escrituras de KV abriria una ventana en la que el usuario ve la
+   * respuesta sin el estado nuevo, o al reves.
+   *
+   * Devuelve null si el issue no tiene ticket asociado: pasa con los issues
+   * creados a mano en el repo, y no es un error.
+   */
+  async aplicarEventoDeIssue(
     numeroIssue: number,
-    estado: EstadoTicket,
+    cambios: { estado?: EstadoTicket; respuesta?: RespuestaTicket },
   ): Promise<Ticket | null> {
     const ticketId = await this.kv.get(`issue:${numeroIssue}`, 'text');
     if (!ticketId) return null;
     const ticket = await this.obtenerTicket(ticketId);
     if (!ticket) return null;
-    ticket.estado = estado;
+
+    if (cambios.estado) {
+      ticket.estado = cambios.estado;
+      // La fecha de cierre se fija la primera vez y no se toca despues: si el
+      // mantenedor reabre y vuelve a cerrar, interesa cuando quedo resuelta.
+      if (cambios.estado === 'resuelta' && !ticket.cerrada_at) {
+        ticket.cerrada_at = new Date().toISOString();
+      }
+      if (cambios.estado !== 'resuelta') ticket.cerrada_at = null;
+    }
+
+    if (cambios.respuesta) {
+      const respuestas = ticket.respuestas ?? [];
+      // Tope defensivo: KV admite 25 MB por valor, pero un hilo eterno no
+      // aporta nada al usuario y engorda cada lectura del listado.
+      respuestas.push(cambios.respuesta);
+      ticket.respuestas = respuestas.slice(-50);
+    }
+
     ticket.updated_at = new Date().toISOString();
     await this.kv.put(`ticket:${ticketId}`, JSON.stringify(ticket));
     return ticket;

@@ -5,18 +5,23 @@
  * propone parches de codigo: si aventura una causa, va como hipotesis y acaba
  * en un comentario del issue, nunca en el cuerpo principal ni como codigo.
  *
- * PENDIENTE DE DEFINIR: el proveedor. La implementacion usa la API de mensajes
- * de Anthropic por defecto; cambiar de proveedor solo deberia tocar
- * `llamarProveedor()`.
+ * El proveedor es Workers AI, la inferencia que corre en la propia Cloudflare.
+ * Se eligio frente a la API de Anthropic porque no lleva clave ni saldo: la
+ * cuenta tenia la clave caducada y luego el saldo a cero, y cada incidencia
+ * caia en el borrador de reserva. A cambio el modelo redacta algo peor, asi que
+ * `extraerJSON()` y el borrador de reserva siguen siendo imprescindibles.
+ *
+ * Cambiar de proveedor solo deberia tocar `llamarProveedor()`.
  */
 
 import type { BorradorTicket, ContextoApp, Severidad } from '../types';
 import { limpiarPasos, limpiarTexto, limpiarTitulo, LIMITES } from '../utils/sanitize';
 import { detalleError } from '../utils/errores';
 
-const MODELO = 'claude-sonnet-4-5';
-const URL_PROVEEDOR = 'https://api.anthropic.com/v1/messages';
-const VERSION_API = '2023-06-01';
+// Modelo de Workers AI. El 70b cuantizado es el que mejor respeta un formato
+// JSON pedido en el prompt sin dispararse de latencia; los de 8b se inventan
+// campos con frecuencia y acaban en el borrador de reserva.
+const MODELO = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
 const INSTRUCCIONES = `Eres el clasificador de incidencias de Livestock Manager, una app de gestion ganadera.
 Recibes el texto libre de un ganadero y devuelves un reporte estructurado.
@@ -39,41 +44,38 @@ Formato exacto:
 
 const SEVERIDADES: Severidad[] = ['alta', 'media', 'baja'];
 
-interface RespuestaProveedor {
-  content?: Array<{ type: string; text?: string }>;
+/**
+ * Texto util de lo que devuelve Workers AI.
+ *
+ * Segun el modelo, `response` llega como cadena con el JSON dentro o como el
+ * objeto ya parseado. Suponer solo lo primero costo un `TypeError: .trim is not
+ * a function` que caia en el borrador de reserva sin decir por que. Se aceptan
+ * las dos formas y, si llega una tercera, el error dice que forma tenia.
+ */
+function textoDeRespuesta(datos: unknown): string {
+  if (typeof datos === 'string') return datos;
+
+  const respuesta = (datos as { response?: unknown } | null)?.response;
+  if (typeof respuesta === 'string') return respuesta;
+  if (respuesta && typeof respuesta === 'object') return JSON.stringify(respuesta);
+
+  throw new Error(
+    'Workers AI devolvio una forma inesperada: ' + JSON.stringify(datos).slice(0, 200)
+  );
 }
 
-async function llamarProveedor(apiKey: string, mensaje: string): Promise<string> {
-  const respuesta = await fetch(URL_PROVEEDOR, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': VERSION_API,
-    },
-    body: JSON.stringify({
-      model: MODELO,
-      max_tokens: 1024,
-      system: INSTRUCCIONES,
-      messages: [{ role: 'user', content: mensaje }],
-    }),
+async function llamarProveedor(ai: Ai, mensaje: string): Promise<string> {
+  // `run` lanza si el modelo no existe o la cuenta agota su cuota diaria; el
+  // catch de `estructurarReporte` lo registra con detalle y cae al de reserva.
+  const datos = await ai.run(MODELO, {
+    max_tokens: 1024,
+    messages: [
+      { role: 'system', content: INSTRUCCIONES },
+      { role: 'user', content: mensaje },
+    ],
   });
 
-  if (!respuesta.ok) {
-    // El codigo HTTP solo no distingue una clave invalida (401) de una sin
-    // saldo (400) o de un limite de uso (429), y el borrador de reserva tapa
-    // el fallo: el usuario recibe un ticket pobre y nadie se entera de por que.
-    // Se recorta el cuerpo porque puede venir con eco de la peticion.
-    let detalle = '';
-    try {
-      detalle = (await respuesta.text()).slice(0, 300);
-    } catch {
-      detalle = '(sin cuerpo)';
-    }
-    throw new Error(`El proveedor de IA respondio ${respuesta.status}: ${detalle}`);
-  }
-  const datos = (await respuesta.json()) as RespuestaProveedor;
-  const texto = datos.content?.find((c) => c.type === 'text')?.text;
+  const texto = textoDeRespuesta(datos).trim();
   if (!texto) throw new Error('El proveedor de IA devolvio una respuesta vacia');
   return texto;
 }
@@ -103,7 +105,7 @@ function borradorDeReserva(ticketId: string, descripcion: string): BorradorTicke
 }
 
 export async function estructurarReporte(
-  apiKey: string,
+  ai: Ai,
   ticketId: string,
   descripcionUsuario: string,
   contexto: ContextoApp,
@@ -119,7 +121,7 @@ export async function estructurarReporte(
 
   let bruto: Record<string, unknown>;
   try {
-    bruto = extraerJSON(await llamarProveedor(apiKey, mensaje));
+    bruto = extraerJSON(await llamarProveedor(ai, mensaje));
   } catch (e) {
     console.warn('[ai] fallo la estructuracion, se usa el borrador de reserva:', detalleError(e));
     return borradorDeReserva(ticketId, descripcionUsuario);

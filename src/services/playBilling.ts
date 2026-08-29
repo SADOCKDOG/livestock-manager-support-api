@@ -106,6 +106,15 @@ export interface ResultadoLicencia {
   /** ISO 8601. null en compra unica: no caduca. */
   expira: string | null;
   motivo?: string;
+  /** true si es suscripcion; false si es compra unica. */
+  es_suscripcion: boolean;
+  /**
+   * Solo en suscripciones. true = Google cobrara de nuevo en `expira`; false =
+   * el usuario la ha cancelado y `expira` es la fecha en que pierde el acceso.
+   * Sin este dato la app tendria que ensenar la misma frase en los dos casos,
+   * que son opuestos para quien la lee.
+   */
+  renovacion_automatica: boolean | null;
 }
 
 /**
@@ -127,7 +136,13 @@ export async function verificarLicenciaAndroid(
   });
 
   if (respuesta.status === 404) {
-    return { activa: false, expira: null, motivo: 'La compra no existe' };
+    return {
+      activa: false,
+      expira: null,
+      motivo: 'La compra no existe',
+      es_suscripcion: SOPORTE_ES_SUSCRIPCION,
+      renovacion_automatica: null,
+    };
   }
   if (!respuesta.ok) {
     // El codigo solo no basta para saber que hacer: un 401 aqui casi siempre es
@@ -143,6 +158,7 @@ export async function verificarLicenciaAndroid(
     const sub = (await respuesta.json()) as {
       expiryTimeMillis?: string;
       paymentState?: number;
+      autoRenewing?: boolean;
     };
     const expiraMs = Number(sub.expiryTimeMillis ?? 0);
     const vigente = expiraMs > Date.now();
@@ -150,6 +166,10 @@ export async function verificarLicenciaAndroid(
       activa: vigente,
       expira: expiraMs ? new Date(expiraMs).toISOString() : null,
       motivo: vigente ? undefined : 'La suscripcion ha caducado',
+      es_suscripcion: true,
+      // Google omite el campo en algunos estados; se toma como cancelada solo
+      // si viene explicitamente en false, no si falta.
+      renovacion_automatica: sub.autoRenewing === undefined ? null : sub.autoRenewing,
     };
   }
 
@@ -163,5 +183,7 @@ export async function verificarLicenciaAndroid(
     activa: comprada,
     expira: null,
     motivo: comprada ? undefined : 'La compra fue cancelada o reembolsada',
+    es_suscripcion: false,
+    renovacion_automatica: null,
   };
 }

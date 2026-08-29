@@ -8,6 +8,8 @@
 export interface Env {
   // --- Bindings ---
   TICKETS_KV: KVNamespace;
+  /** Workers AI. Sustituye a la API de Anthropic: no lleva clave ni saldo. */
+  AI: Ai;
 
   // --- Variables publicas (wrangler.toml [vars]) ---
   GITHUB_REPO_OWNER: string;
@@ -21,7 +23,11 @@ export interface Env {
   GITHUB_APP_PRIVATE_KEY: string;
   GITHUB_APP_INSTALLATION_ID: string;
   GITHUB_WEBHOOK_SECRET: string;
-  AI_API_KEY: string;
+  /**
+   * OBSOLETO desde la migracion a Workers AI. El secreto sigue en Cloudflare
+   * pero ya no lo lee nadie; se puede borrar sin efecto.
+   */
+  AI_API_KEY?: string;
   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: string;
   JWT_SECRET: string;
   /** Opcional: solo si se habilita el pago web para la PWA. */
@@ -36,6 +42,22 @@ export type Severidad = 'alta' | 'media' | 'baja';
 /** Plataforma de origen: determina como se verifica la licencia. */
 export type Plataforma = 'android' | 'web';
 
+/**
+ * Respuesta del equipo a una incidencia.
+ *
+ * Nace de un comentario en el issue, pero el usuario nunca ve GitHub: no se
+ * guarda ni el login del autor ni el numero del comentario, solo lo que hay
+ * que ensenar. Los comentarios del propio bot (la hipotesis de la IA) no
+ * llegan hasta aqui: se filtran en el webhook.
+ */
+export interface RespuestaTicket {
+  /** ISO 8601. */
+  fecha: string;
+  texto: string;
+  /** true si acompana al cierre de la incidencia. */
+  cierre?: boolean;
+}
+
 /** Registro de ticket en KV. */
 export interface Ticket {
   ticket_id: string;
@@ -46,6 +68,14 @@ export interface Ticket {
   severidad: Severidad;
   created_at: string;
   updated_at: string;
+  /**
+   * Respuestas del equipo, de la mas antigua a la mas reciente. Opcional
+   * porque los tickets creados antes de esta funcionalidad no la tienen:
+   * leerla siempre con `?? []`.
+   */
+  respuestas?: RespuestaTicket[];
+  /** ISO 8601 del cierre. Solo se rellena al pasar a `resuelta`. */
+  cerrada_at?: string | null;
 }
 
 /** Registro de usuario en KV. */
