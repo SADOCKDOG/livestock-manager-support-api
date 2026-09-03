@@ -65,6 +65,12 @@ function esDeLaApp(comentario: Comentario | undefined): boolean {
  *
  * Todo lo que escribe una persona pasa siempre.
  */
+/**
+ * Comentarios de la App que el usuario NO debe ver: la hipotesis tecnica de la
+ * IA y el eco de sus propios mensajes (que la app ya guardo al enviarlos). Se
+ * distinguen de la respuesta del agente por el marcador, que nadie mas puede
+ * escribir porque limpiarTexto() borra los comentarios HTML.
+ */
 function esComentarioOculto(comentario: Comentario | undefined): boolean {
   return esDeLaApp(comentario) && !esDelAgente(comentario?.body);
 }

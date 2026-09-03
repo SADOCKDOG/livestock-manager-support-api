@@ -63,3 +63,21 @@ export function textoSinMarcador(cuerpo: string): string {
   if (lineas[0]?.trim() === ENCABEZADO) lineas.shift();
   return lineas.join('\n').trim();
 }
+
+/**
+ * Marcador de los mensajes que el propio usuario escribe desde la app.
+ *
+ * Existe por la misma razon que MARCADOR_AGENTE: la App de GitHub publica con
+ * una sola identidad, asi que sin marcador un mensaje del usuario seria
+ * indistinguible de una respuesta del equipo y volveria a la app como si se lo
+ * hubiera contestado alguien. El texto ya se guarda en KV al enviarlo, de modo
+ * que el webhook debe ignorar este comentario cuando le llegue de vuelta.
+ */
+export const MARCADOR_USUARIO = '<!-- livestock:mensaje-usuario -->';
+
+const ENCABEZADO_USUARIO = 'Mensaje de la persona que reporto la incidencia:';
+
+/** Envuelve el mensaje del usuario para publicarlo como comentario del issue. */
+export function comentarioDelUsuario(texto: string): string {
+  return [MARCADOR_USUARIO, ENCABEZADO_USUARIO, '', texto].join('\n');
+}

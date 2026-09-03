@@ -146,6 +146,24 @@ export class Almacen {
     return ticket;
   }
 
+  /**
+   * Anade una respuesta a un ticket identificado por su id (no por el numero
+   * de issue). La usa el endpoint con el que el usuario contesta desde la app,
+   * donde ya se sabe cual es el ticket y quien es su dueno, en lugar de
+   * esperar a que el webhook devuelva el comentario: el webhook ignora los
+   * mensajes del propio usuario para no duplicarlos.
+   */
+  async anadirRespuesta(ticketId: string, respuesta: RespuestaTicket): Promise<Ticket | null> {
+    const ticket = await this.obtenerTicket(ticketId);
+    if (!ticket) return null;
+    const respuestas = ticket.respuestas ?? [];
+    respuestas.push(respuesta);
+    ticket.respuestas = respuestas.slice(-50);
+    ticket.updated_at = new Date().toISOString();
+    await this.kv.put('ticket:' + ticketId, JSON.stringify(ticket));
+    return ticket;
+  }
+
   // --- Rate limiting --------------------------------------------------------
 
   /** Devuelve el numero de tickets creados hoy por el usuario (UTC). */
@@ -161,5 +179,24 @@ export class Almacen {
     const actual = await this.contarTicketsDelDia(userId);
     // 48h de TTL: cubre el dia en curso con margen para husos horarios.
     await this.kv.put(clave, String(actual + 1), { expirationTtl: 60 * 60 * 48 });
+  }
+
+  /**
+   * Contador aparte para los mensajes que el usuario escribe en incidencias ya
+   * abiertas. No comparte cupo con la creacion de tickets: agotar el limite
+   * respondiendo a soporte no debe impedirte reportar un fallo nuevo.
+   */
+  async contarMensajesDelDia(userId: string): Promise<number> {
+    const dia = new Date().toISOString().slice(0, 10);
+    const valor = await this.kv.get('msgs:' + userId + ':' + dia, 'text');
+    return valor ? parseInt(valor, 10) || 0 : 0;
+  }
+
+  async incrementarMensajesDelDia(userId: string): Promise<void> {
+    const dia = new Date().toISOString().slice(0, 10);
+    const actual = await this.contarMensajesDelDia(userId);
+    await this.kv.put('msgs:' + userId + ':' + dia, String(actual + 1), {
+      expirationTtl: 60 * 60 * 48,
+    });
   }
 }

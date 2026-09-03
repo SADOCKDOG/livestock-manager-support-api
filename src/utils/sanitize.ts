@@ -14,6 +14,7 @@ export const LIMITES = {
   paso: 300,
   pasos: 20,
   causa: 1000,
+  mensaje: 2000,
 } as const;
 
 /**

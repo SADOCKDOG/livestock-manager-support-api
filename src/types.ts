@@ -15,6 +15,7 @@ export interface Env {
   GITHUB_REPO_OWNER: string;
   GITHUB_REPO_NAME: string;
   MAX_TICKETS_PER_DAY: string;
+  MAX_MENSAJES_PER_DAY?: string;
   /** Solo 'development' salta la verificacion de licencia. Nunca en produccion. */
   ENTORNO?: string;
 
@@ -78,7 +79,7 @@ export interface RespuestaTicket {
    * tickets anteriores al agente no lo tienen; al leerlo, ausente = 'equipo',
    * que es lo que eran todas las respuestas hasta ahora.
    */
-  autor?: 'ia' | 'equipo';
+  autor?: 'ia' | 'equipo' | 'usuario';
 }
 
 /** Registro de ticket en KV. */

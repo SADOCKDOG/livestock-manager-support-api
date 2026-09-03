@@ -217,21 +217,27 @@ export async function reemplazarEtiquetaDeEstado(
 
 /**
  * Anade un comentario al issue. Se usa para la hipotesis tecnica de la IA, que
- * va separada del cuerpo para que se lea como lo que es: una sugerencia, y
- * para la respuesta del agente, que si llega al usuario.
+ * va separada del cuerpo para que se lea como lo que es: una sugerencia; para
+ * la respuesta del agente, que si llega al usuario; y para los mensajes que el
+ * usuario escribe desde la app.
+ *
+ * Devuelve si GitHub lo acepto. Casi todas las llamadas pueden ignorarlo (un
+ * comentario perdido no invalida el ticket), pero el mensaje del usuario si
+ * necesita saberlo: si no llega a GitHub, nadie del equipo lo va a leer.
  */
 export async function comentarIssue(
   env: Env,
   numero: number,
   texto: string,
-): Promise<void> {
+): Promise<boolean> {
   const respuesta = await peticionGitHub(
     env,
     `/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/issues/${numero}/comments`,
     { method: 'POST', body: JSON.stringify({ body: texto }) },
   );
   if (!respuesta.ok) {
-    // Un comentario fallido no invalida el ticket: se registra y se sigue.
     console.warn('[github] no se pudo comentar el issue', numero, respuesta.status);
+    return false;
   }
+  return true;
 }

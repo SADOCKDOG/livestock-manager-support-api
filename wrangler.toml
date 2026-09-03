@@ -10,6 +10,7 @@ compatibility_flags = ["nodejs_compat"]
 GITHUB_REPO_OWNER = "SADOCKDOG"
 GITHUB_REPO_NAME = "livestock-manager-support-tickets"
 MAX_TICKETS_PER_DAY = "5"
+MAX_MENSAJES_PER_DAY = "10"
 
 # Workers AI: inferencia dentro de Cloudflare, sin clave ni saldo.
 [ai]
@@ -24,6 +25,7 @@ id = "4fd0fd1738244c4799628b32b9ce1487"
 GITHUB_REPO_OWNER = "SADOCKDOG"
 GITHUB_REPO_NAME = "livestock-manager-support-tickets"
 MAX_TICKETS_PER_DAY = "5"
+MAX_MENSAJES_PER_DAY = "10"
 
 # Workers AI tambien aqui: los bindings no se heredan por entorno.
 [env.production.ai]

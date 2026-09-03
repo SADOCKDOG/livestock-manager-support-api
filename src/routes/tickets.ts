@@ -14,7 +14,7 @@
 import { Hono } from 'hono';
 import { estructurarReporte, redactarRespuestaInicial } from '../services/ai';
 import { comentarIssue, crearIssue, reemplazarEtiquetaDeEstado } from '../services/github';
-import { ACUSE_DE_RESERVA, comentarioDelAgente } from '../utils/agente';
+import { ACUSE_DE_RESERVA, comentarioDelAgente, comentarioDelUsuario } from '../utils/agente';
 import { Almacen } from '../services/storage';
 import { requiereLicencia, requiereSesion } from '../middleware/auth';
 import { limitarTickets } from '../middleware/rateLimit';
@@ -245,6 +245,61 @@ rutas.get('/', requiereSesion, async (c) => {
       };
     }),
   });
+});
+
+/**
+ * Mensaje del usuario en una incidencia ya abierta.
+ *
+ * Sin esto el canal era de una sola direccion, y el agente automatico pide
+ * datos («cuentanos tambien...») que el usuario no tenia forma de dar.
+ *
+ * Se publica en GitHub ANTES de guardarlo en KV, a proposito: si GitHub falla
+ * y se hubiera guardado primero, el usuario veria su mensaje en la app
+ * creyendolo enviado cuando nadie del equipo va a leerlo nunca. Al reves la
+ * degradacion es benigna: el equipo lo lee aunque la app no lo muestre.
+ *
+ * No exige licencia, igual que el listado: quien ya ha abierto una incidencia
+ * puede seguir hablando de ella aunque su licencia caduque.
+ */
+rutas.post('/:id/responder', requiereSesion, async (c) => {
+  const usuario = c.get('usuario');
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Falta el identificador' }, 400);
+
+  const cuerpo = await c.req.json().catch(() => null);
+  const texto = limpiarTexto(cuerpo?.texto, LIMITES.mensaje);
+  if (!texto) return c.json({ error: 'El mensaje esta vacio' }, 400);
+
+  const almacen = new Almacen(c.env.TICKETS_KV);
+  const ticket = await almacen.obtenerTicket(id);
+  // Mismo 404 que en el detalle: no se filtra que la incidencia exista.
+  if (!ticket || ticket.user_id !== usuario.user_id) {
+    return c.json({ error: 'Incidencia no encontrada' }, 404);
+  }
+  if (ticket.github_issue_number === null) {
+    return c.json({ error: 'Esta incidencia todavia no admite mensajes' }, 409);
+  }
+
+  const maximo = parseInt(c.env.MAX_MENSAJES_PER_DAY ?? '10', 10) || 10;
+  const usados = await almacen.contarMensajesDelDia(usuario.user_id);
+  if (usados >= maximo) {
+    return c.json({ error: 'Has enviado demasiados mensajes hoy. Intentalo manana.' }, 429);
+  }
+
+  const publicado = await comentarIssue(
+    c.env,
+    ticket.github_issue_number,
+    comentarioDelUsuario(texto),
+  );
+  if (!publicado) {
+    return c.json({ error: 'No se ha podido enviar el mensaje. Intentalo mas tarde.' }, 502);
+  }
+
+  const respuesta = { fecha: new Date().toISOString(), texto, autor: 'usuario' as const };
+  await almacen.anadirRespuesta(id, respuesta);
+  await almacen.incrementarMensajesDelDia(usuario.user_id);
+
+  return c.json({ respuesta });
 });
 
 rutas.get('/:id', requiereSesion, async (c) => {
