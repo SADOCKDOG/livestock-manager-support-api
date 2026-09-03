@@ -14,9 +14,11 @@
 import { Hono } from 'hono';
 import { SignJWT } from 'jose';
 import { verificarLicenciaAndroid } from '../services/playBilling';
+import { tokenDeAcceso as tokenEntraID } from '../services/msStoreBilling';
 import { Almacen } from '../services/storage';
 import { requiereSesion } from '../middleware/auth';
 import { resolverIdentidad } from '../services/identidad';
+import { detalleError } from '../utils/errores';
 import type { Env, Plataforma, Usuario, Variables } from '../types';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -141,6 +143,38 @@ rutas.post('/verify-purchase', async (c) => {
     ...sesion,
     licencia: { activa: true, expira: resultado.expira },
   });
+});
+
+/**
+ * Ticket de servicio para acunar la Store ID key.
+ *
+ * El cliente no puede pedirselo el mismo a Entra ID porque haria falta el
+ * secreto de cliente, que no sale de aqui. La ruta es abierta pero no concede
+ * nada: con el ticket solo se puede acunar una clave para la identidad de
+ * Windows de quien llama, y esa clave hay que traerla luego a
+ * /auth/verify-purchase para que sirva de algo.
+ */
+rutas.post('/ms/ticket', async (c) => {
+  if (!c.env.MS_ENTRA_TENANT_ID || !c.env.MS_ENTRA_CLIENT_ID || !c.env.MS_ENTRA_CLIENT_SECRET) {
+    return c.json(
+      {
+        error: 'La compra en Microsoft Store todavia no esta disponible',
+        codigo: 'MS_STORE_NO_CONFIGURADO',
+      },
+      501,
+    );
+  }
+  try {
+    const ticket = await tokenEntraID(
+      c.env.MS_ENTRA_TENANT_ID,
+      c.env.MS_ENTRA_CLIENT_ID,
+      c.env.MS_ENTRA_CLIENT_SECRET,
+    );
+    return c.json({ ticket });
+  } catch (e) {
+    console.error('[auth] fallo el ticket de Entra ID:', detalleError(e));
+    return c.json({ error: 'No se pudo contactar con Microsoft ahora mismo' }, 502);
+  }
 });
 
 /** Estado actual de la licencia, para que la app decida que mostrar. */
