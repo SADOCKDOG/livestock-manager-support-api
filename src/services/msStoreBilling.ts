@@ -15,6 +15,12 @@ export const PRODUCTO_SOPORTE_MS = 'support_unlock';
 
 const URL_COLECCIONES = 'https://collections.mp.microsoft.com/v6.0/collections/query';
 /**
+ * `localTicketReference` es obligatorio y vuelve reflejado en cada elemento.
+ * No se usa para nada aqui: se manda un valor fijo y no vacio para cumplir el
+ * contrato sin filtrar informacion del usuario.
+ */
+const REFERENCIA = 'soporte';
+/**
  * Hay DOS audiencias distintas y no son intercambiables (lo documenta
  * Microsoft y lo confirma su libreria Microsoft.StoreServices):
  *  - SERVICIO: el bearer con el que este Worker llama a la API de colecciones.
@@ -182,8 +188,17 @@ export async function verificarLicenciaWindows(
     body: JSON.stringify({
       maxPageSize: 100,
       beneficiaries: [
-        { identitytype: 'b2b', identityValue: storeIdKey, localTicketReference: '' },
+        { identityType: 'b2b', identityValue: storeIdKey, localTicketReference: REFERENCIA },
       ],
+      // Obligatorio: sin el la API responde 400. 'Durable' es lo que devuelve
+      // un complemento de suscripcion; 'UnmanagedConsumable' se incluye por si
+      // el add-on cambiara de tipo. No se pide 'Application' porque solo
+      // traeria la propia app, que aqui no interesa.
+      productTypes: ['Durable', 'UnmanagedConsumable'],
+      // Imprescindible: por defecto la API solo devuelve lo vigente. Sin esto
+      // una licencia caducada seria indistinguible de no haber comprado nunca,
+      // y se perderia el ancla de identidad que reencuentra el historial.
+      validityType: 'All',
     }),
   });
   if (!respuesta.ok) {
