@@ -34,6 +34,10 @@ const ORIGENES = [
   'http://localhost:8080',
   'http://localhost:8088',
   'https://sadockdog.github.io',
+  // La app de escritorio (Tauri 2) sirve el frontend desde su propio origen.
+  'tauri://localhost',
+  'http://tauri.localhost',
+  'https://tauri.localhost',
 ];
 
 app.use(

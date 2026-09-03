@@ -16,6 +16,8 @@ export interface Env {
   GITHUB_REPO_NAME: string;
   MAX_TICKETS_PER_DAY: string;
   MAX_MENSAJES_PER_DAY?: string;
+  /** Tope de tickets de Microsoft Store por IP y hora. Por defecto 30. */
+  MAX_TICKETS_MS_POR_HORA?: string;
   /** Solo 'development' salta la verificacion de licencia. Nunca en produccion. */
   ENTORNO?: string;
 
@@ -33,6 +35,10 @@ export interface Env {
   JWT_SECRET: string;
   /** Opcional: solo si se habilita el pago web para la PWA. */
   STRIPE_SECRET_KEY?: string;
+  /** Registro de aplicacion en Entra ID, para la API de colecciones de Microsoft. */
+  MS_ENTRA_TENANT_ID?: string;
+  MS_ENTRA_CLIENT_ID?: string;
+  MS_ENTRA_CLIENT_SECRET?: string;
 }
 
 /**
@@ -57,7 +63,7 @@ export const RANGO_ESTADO: Record<EstadoTicket, number> = {
 export type Severidad = 'alta' | 'media' | 'baja';
 
 /** Plataforma de origen: determina como se verifica la licencia. */
-export type Plataforma = 'android' | 'web';
+export type Plataforma = 'android' | 'web' | 'windows';
 
 /**
  * Respuesta a una incidencia.
@@ -114,7 +120,11 @@ export interface Usuario {
   user_id: string;
   email: string;
   plataforma: Plataforma;
-  /** Token de compra de Play (android) o id de suscripcion de Stripe (web). */
+  /**
+   * Token de compra de Play (android) o, en windows, el orderId de la compra en
+   * Microsoft Store. En windows NO es un secreto reutilizable: la prueba de
+   * compra es la Store ID key, que caduca a los 30 dias y se pide de nuevo.
+   */
   purchase_token?: string;
   /**
    * Identificador de la instalacion de la app, generado en el dispositivo y

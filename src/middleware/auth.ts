@@ -31,7 +31,12 @@ export async function verificarSesion(
     return {
       sub: payload.sub,
       email: String(payload.email ?? ''),
-      plataforma: (payload.plataforma === 'web' ? 'web' : 'android') as SesionJWT['plataforma'],
+      // Lista blanca explicita: 'android' es el valor por defecto historico,
+      // pero degradar 'windows' a 'android' archivaria las incidencias del
+      // escritorio con la plataforma equivocada.
+      plataforma: (payload.plataforma === 'web' || payload.plataforma === 'windows'
+        ? payload.plataforma
+        : 'android') as SesionJWT['plataforma'],
     };
   } catch {
     return null;

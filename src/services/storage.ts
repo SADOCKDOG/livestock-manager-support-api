@@ -9,6 +9,7 @@
  *   tickets-usuario:<user_id> -> string[] (ticket_id, mas reciente primero)
  *   borrador:<ticket_id>      -> BorradorTicket     (TTL corto)
  *   ratelimit:<user_id>:<dia> -> contador
+ *   ratelimit:msticket:<ip>:<hora> -> contador
  *
  * KV es de consistencia eventual: sirve para el mapeo, pero como contador de
  * rate limiting puede burlarse con peticiones en paralelo. Si eso llega a
@@ -234,6 +235,26 @@ export class Almacen {
     const actual = await this.contarTicketsDelDia(userId);
     // 48h de TTL: cubre el dia en curso con margen para husos horarios.
     await this.kv.put(clave, String(actual + 1), { expirationTtl: 60 * 60 * 48 });
+  }
+
+  /**
+   * Contador por IP y hora para el acunado de claves de Microsoft Store, que es
+   * anonimo por necesidad: WinRT necesita el ticket antes de que exista sesion,
+   * asi que no hay user_id con el que limitar. Ventana horaria en vez de diaria
+   * porque una IP compartida (oficina, NAT de operador) agrupa a mucha gente y
+   * un cupo diario la dejaria fuera todo el dia.
+   */
+  async contarAcunadosDeLaHora(ip: string): Promise<number> {
+    const hora = new Date().toISOString().slice(0, 13);
+    const valor = await this.kv.get(`ratelimit:msticket:${ip}:${hora}`, 'text');
+    return valor ? parseInt(valor, 10) || 0 : 0;
+  }
+
+  async incrementarAcunadosDeLaHora(ip: string): Promise<void> {
+    const hora = new Date().toISOString().slice(0, 13);
+    const clave = `ratelimit:msticket:${ip}:${hora}`;
+    const actual = await this.contarAcunadosDeLaHora(ip);
+    await this.kv.put(clave, String(actual + 1), { expirationTtl: 60 * 60 * 3 });
   }
 
   /**
