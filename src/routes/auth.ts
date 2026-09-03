@@ -143,8 +143,8 @@ rutas.post('/verify-purchase', async (c) => {
       // se consulta por comprador, y la recien leida es la de quien llama. Se
       // responde con lo ultimo guardado de esa persona, que es lo que devuelve
       // aqui el freno `dos-licencias-vivas`.
-      comprobarLicencia: async (orderIdViejo) =>
-        licenciaVivaSegunAlmacen(await almacen.obtenerUsuario(await hashUserIdWindows(orderIdViejo))),
+      comprobarLicencia: async (tokenViejo) =>
+        licenciaVivaSegunAlmacen(await usuarioDelTokenAnterior(almacen, tokenViejo)),
     });
     if (motivo !== 'usuario-conocido' && motivo !== 'instalacion-nueva') {
       console.log(`[auth] identidad resuelta (windows): ${motivo}`);
@@ -331,6 +331,22 @@ async function hashUserId(purchaseToken: string): Promise<string> {
  */
 async function hashUserIdWindows(orderId: string): Promise<string> {
   return hashDe(`usuario:ms:${orderId}`);
+}
+
+/**
+ * El usuario que ya tenia esta instalacion, buscado por su token de compra.
+ *
+ * Se prueban los dos esquemas de hash porque el anterior no tiene por que ser
+ * de Windows: el id de instalacion vive en IndexedDB y viaja en la copia de
+ * seguridad, asi que quien restaure en el escritorio la copia de un movil
+ * traera la instalacion de un usuario de Android. Buscando solo con el hash de
+ * Windows no se le encontraria, el freno `dos-licencias-vivas` no saltaria, y
+ * se le entregaria su historial a otra persona.
+ */
+async function usuarioDelTokenAnterior(almacen: Almacen, tokenViejo: string) {
+  const comoWindows = await almacen.obtenerUsuario(await hashUserIdWindows(tokenViejo));
+  if (comoWindows) return comoWindows;
+  return almacen.obtenerUsuario(await hashUserId(tokenViejo));
 }
 
 export default rutas;
