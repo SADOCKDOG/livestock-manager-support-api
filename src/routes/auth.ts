@@ -16,6 +16,7 @@ import { SignJWT } from 'jose';
 import { verificarLicenciaAndroid } from '../services/playBilling';
 import {
   AUDIENCIA_CLAVE_COLECCIONES,
+  licenciaVivaSegunAlmacen,
   tokenDeAcceso as tokenEntraID,
   verificarLicenciaWindows,
 } from '../services/msStoreBilling';
@@ -138,11 +139,12 @@ rutas.post('/verify-purchase', async (c) => {
       // encadenada nunca se dispara aqui y cae en licencia-anterior-caducada,
       // que es el comportamiento correcto.
       tokenEncadenado: null,
-      // No se puede reconsultar una compra ajena: la coleccion se consulta por
-      // comprador, no por pedido. La compra anterior de ESTA instalacion estaba
-      // en la coleccion que se acaba de leer, asi que si no ha salido como
-      // activa es que no lo esta.
-      comprobarLicencia: async () => ({ activa: false }),
+      // La compra anterior no se puede reconsultar en Microsoft: la coleccion
+      // se consulta por comprador, y la recien leida es la de quien llama. Se
+      // responde con lo ultimo guardado de esa persona, que es lo que devuelve
+      // aqui el freno `dos-licencias-vivas`.
+      comprobarLicencia: async (orderIdViejo) =>
+        licenciaVivaSegunAlmacen(await almacen.obtenerUsuario(await hashUserIdWindows(orderIdViejo))),
     });
     if (motivo !== 'usuario-conocido' && motivo !== 'instalacion-nueva') {
       console.log(`[auth] identidad resuelta (windows): ${motivo}`);

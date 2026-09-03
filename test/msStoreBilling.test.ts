@@ -7,7 +7,10 @@
 
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { interpretarColeccion } from '../src/services/msStoreBilling.ts';
+import {
+  interpretarColeccion,
+  licenciaVivaSegunAlmacen,
+} from '../src/services/msStoreBilling.ts';
 
 const AHORA = Date.parse('2026-09-03T12:00:00.000Z');
 const INSTALACION = '35e52bca-aa09-4d81-9a33-44b358bab7c3';
@@ -127,4 +130,49 @@ test('varias activas: entre ellas sigue ganando la que caduca mas tarde', () => 
   );
   assert.equal(r.activa, true);
   assert.equal(r.order_id, 'larga');
+});
+
+// --- licenciaVivaSegunAlmacen ------------------------------------------------
+// Es el freno que impide adoptar la identidad de alguien con la licencia viva.
+// En Windows la instalacion que declara el cliente no la valida nadie, asi que
+// sin este freno bastaria con declarar la instalacion ajena para heredar su
+// historial de incidencias.
+
+test('la licencia del anterior consta viva si no ha caducado', () => {
+  const r = licenciaVivaSegunAlmacen(
+    { licencia_soporte_activa: true, licencia_expira: '2026-10-01T00:00:00.000Z' },
+    AHORA,
+  );
+  assert.equal(r.activa, true);
+});
+
+test('caducada: se puede adoptar la identidad, que es la reinstalacion legitima', () => {
+  const r = licenciaVivaSegunAlmacen(
+    { licencia_soporte_activa: true, licencia_expira: '2026-08-01T00:00:00.000Z' },
+    AHORA,
+  );
+  assert.equal(r.activa, false);
+});
+
+test('sin fecha de caducidad se frena: ante la duda, no se adopta', () => {
+  assert.equal(
+    licenciaVivaSegunAlmacen({ licencia_soporte_activa: true, licencia_expira: null }, AHORA).activa,
+    true,
+  );
+  assert.equal(
+    licenciaVivaSegunAlmacen({ licencia_soporte_activa: true, licencia_expira: 'vaya' }, AHORA)
+      .activa,
+    true,
+  );
+});
+
+test('sin usuario o con la licencia apagada no hay nada que frenar', () => {
+  assert.equal(licenciaVivaSegunAlmacen(null, AHORA).activa, false);
+  assert.equal(
+    licenciaVivaSegunAlmacen(
+      { licencia_soporte_activa: false, licencia_expira: '2027-01-01T00:00:00.000Z' },
+      AHORA,
+    ).activa,
+    false,
+  );
 });

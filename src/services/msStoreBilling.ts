@@ -77,6 +77,34 @@ function vacia(motivo: string): LicenciaWindows {
  * Decide si hay licencia a partir de la coleccion. Puro: sin red ni reloj
  * implicito, para poder probarlo contra respuestas grabadas.
  */
+/**
+ * ?Sigue viva la licencia del usuario que ya tenia esta instalacion?
+ *
+ * En Android esto se le pregunta a Google con el token viejo. En Windows no se
+ * puede: la coleccion se consulta por comprador, y la que se acaba de leer es
+ * la de QUIEN LLAMA, no la del anterior. Sin una respuesta, el freno
+ * `dos-licencias-vivas` no existiria aqui, y eso importa porque la instalacion
+ * que declara el cliente al acunar la clave se la inventa el: Microsoft la
+ * devuelve firmada, pero no la valida. Quien declarase la instalacion de otro
+ * se llevaria su historial de incidencias.
+ *
+ * Asi que se responde con lo ultimo que sabemos de esa persona, que es lo que
+ * quedo guardado la ultima vez que abrio la app. Queda un hueco: si renovo y no
+ * ha vuelto a abrirla desde entonces, su licencia consta caducada y se puede
+ * adoptar. Es mucho menos malo que la alternativa, que era no frenar nunca.
+ */
+export function licenciaVivaSegunAlmacen(
+  usuario: { licencia_soporte_activa?: boolean; licencia_expira?: string | null } | null,
+  ahora: number = Date.now(),
+): { activa: boolean } {
+  if (!usuario || !usuario.licencia_soporte_activa) return { activa: false };
+  // Sin fecha se considera viva: ante la duda, no se adopta la identidad.
+  if (!usuario.licencia_expira) return { activa: true };
+  const expira = Date.parse(usuario.licencia_expira);
+  if (Number.isNaN(expira)) return { activa: true };
+  return { activa: expira > ahora };
+}
+
 export function interpretarColeccion(
   items: ElementoColeccion[],
   ahoraMs: number = Date.now(),
