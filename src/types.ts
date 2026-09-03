@@ -100,6 +100,13 @@ export interface Ticket {
   respuestas?: RespuestaTicket[];
   /** ISO 8601 del cierre. Solo se rellena al pasar a `resuelta`. */
   cerrada_at?: string | null;
+  /**
+   * ISO 8601 del momento en que el usuario confirmo que la solucion le
+   * funciona. `resuelta` la pone el equipo, asi que hasta que este campo
+   * tenga valor es una propuesta de resolucion, no un cierre aceptado: la
+   * app se apoya en el para ofrecer «si, resuelto» o «sigue sin funcionar».
+   */
+  confirmada_at?: string | null;
 }
 
 /** Registro de usuario en KV. */

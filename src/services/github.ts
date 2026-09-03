@@ -241,3 +241,31 @@ export async function comentarIssue(
   }
   return true;
 }
+
+/**
+ * Abre o cierra el issue.
+ *
+ * Lo usa la confirmacion de resolucion: `estado:resuelta` lo pone el equipo,
+ * pero mientras la persona que reporto el fallo no diga que ya le funciona es
+ * una propuesta, no un cierre. Al confirmar se cierra el issue de verdad; si
+ * responde que sigue fallando se reabre y vuelve a `estado:curso`.
+ *
+ * Devuelve si GitHub lo acepto: quien reabre necesita saberlo, porque dejar la
+ * incidencia en curso en KV con el issue cerrado la esconde del equipo.
+ */
+export async function cambiarAperturaDelIssue(
+  env: Env,
+  numero: number,
+  abierto: boolean,
+): Promise<boolean> {
+  const respuesta = await peticionGitHub(
+    env,
+    `/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/issues/${numero}`,
+    { method: 'PATCH', body: JSON.stringify({ state: abierto ? 'open' : 'closed' }) },
+  );
+  if (!respuesta.ok) {
+    console.warn('[github] no se pudo cambiar la apertura del issue', numero, respuesta.status);
+    return false;
+  }
+  return true;
+}

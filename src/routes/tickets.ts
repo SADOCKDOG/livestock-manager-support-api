@@ -13,13 +13,26 @@
 
 import { Hono } from 'hono';
 import { estructurarReporte, redactarRespuestaInicial } from '../services/ai';
-import { comentarIssue, crearIssue, reemplazarEtiquetaDeEstado } from '../services/github';
+import {
+  cambiarAperturaDelIssue,
+  comentarIssue,
+  crearIssue,
+  reemplazarEtiquetaDeEstado,
+} from '../services/github';
 import { ACUSE_DE_RESERVA, comentarioDelAgente, comentarioDelUsuario } from '../utils/agente';
 import { Almacen } from '../services/storage';
 import { requiereLicencia, requiereSesion } from '../middleware/auth';
 import { limitarTickets } from '../middleware/rateLimit';
 import { bloqueContexto, limpiarPasos, limpiarTexto, limpiarTitulo, LIMITES } from '../utils/sanitize';
-import type { BorradorTicket, ContextoApp, Env, Severidad, Ticket, Variables } from '../types';
+import type {
+  BorradorTicket,
+  ContextoApp,
+  Env,
+  EstadoTicket,
+  Severidad,
+  Ticket,
+  Variables,
+} from '../types';
 import { detalleError } from '../utils/errores';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -228,7 +241,12 @@ rutas.get('/', requiereSesion, async (c) => {
   return c.json({
     tickets: tickets.map((t) => {
       const respuestas = t.respuestas ?? [];
-      const ultima = respuestas[respuestas.length - 1];
+      // Los mensajes del propio usuario no cuentan como respuesta: la app usa
+      // estos dos campos para decir «tienes respuesta nueva» y para avisar por
+      // notificacion, y anunciarle a alguien lo que acaba de escribir el
+      // mismo es ruido. Se cuenta y se fecha solo lo que viene de fuera.
+      const ajenas = respuestas.filter((r) => r.autor !== 'usuario');
+      const ultima = ajenas[ajenas.length - 1];
       return {
         ticket_id: t.ticket_id,
         titulo: t.titulo,
@@ -240,7 +258,7 @@ rutas.get('/', requiereSesion, async (c) => {
         // El listado no manda el texto de las respuestas, solo cuantas hay y
         // la fecha de la ultima: con eso la app marca las no leidas sin
         // arrastrar el hilo entero de cada incidencia en cada carga.
-        respuestas: respuestas.length,
+        respuestas: ajenas.length,
         ultima_respuesta_at: ultima ? ultima.fecha : null,
       };
     }),
@@ -295,11 +313,70 @@ rutas.post('/:id/responder', requiereSesion, async (c) => {
     return c.json({ error: 'No se ha podido enviar el mensaje. Intentalo mas tarde.' }, 502);
   }
 
+  // Escribir en una incidencia dada por resuelta es decir «no, esto sigue
+  // pasando»: se reabre el issue y vuelve a `revision`, no a `curso`, porque
+  // significa que vuelve a la cola del equipo, no que alguien este ya con
+  // ella. Si GitHub no acepta la reapertura no se toca el estado local: una
+  // incidencia «en revision» con el issue cerrado no la ve nadie.
+  let estado: EstadoTicket | undefined;
+  if (ticket.estado === 'resuelta') {
+    const reabierto = await cambiarAperturaDelIssue(c.env, ticket.github_issue_number, true);
+    if (reabierto) {
+      await reemplazarEtiquetaDeEstado(
+        c.env, ticket.github_issue_number, 'estado:resuelta', 'estado:revision',
+      );
+      estado = 'revision';
+    }
+  }
+
   const respuesta = { fecha: new Date().toISOString(), texto, autor: 'usuario' as const };
-  await almacen.anadirRespuesta(id, respuesta);
+  const actualizado = await almacen.anadirRespuesta(id, respuesta, { estado });
   await almacen.incrementarMensajesDelDia(usuario.user_id);
 
-  return c.json({ respuesta });
+  return c.json({ respuesta, estado: actualizado?.estado ?? ticket.estado });
+});
+
+/**
+ * El usuario confirma que la solucion le funciona.
+ *
+ * `estado:resuelta` lo pone el equipo, que no puede saber si al usuario le
+ * sirvio: hasta que llega esta confirmacion es una propuesta de resolucion, y
+ * la app la presenta como una pregunta («ya funciona?») con dos salidas. El
+ * «no» no pasa por aqui, es un mensaje normal en /responder, que reabre.
+ *
+ * Cierra el issue en GitHub porque es el cierre real de la incidencia. Si
+ * GitHub falla se guarda igualmente la confirmacion: para el usuario el
+ * asunto esta zanjado, y un issue abierto de mas solo cuesta una revision al
+ * equipo. Es la degradacion contraria a la de /responder, y a proposito.
+ */
+rutas.post('/:id/confirmar', requiereSesion, async (c) => {
+  const usuario = c.get('usuario');
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Falta el identificador' }, 400);
+
+  const almacen = new Almacen(c.env.TICKETS_KV);
+  const ticket = await almacen.obtenerTicket(id);
+  if (!ticket || ticket.user_id !== usuario.user_id) {
+    return c.json({ error: 'Incidencia no encontrada' }, 404);
+  }
+  if (ticket.estado !== 'resuelta') {
+    return c.json({ error: 'Esta incidencia todavia no esta resuelta' }, 409);
+  }
+  if (ticket.confirmada_at) {
+    return c.json({ confirmada_at: ticket.confirmada_at });
+  }
+
+  if (ticket.github_issue_number !== null) {
+    await comentarIssue(
+      c.env,
+      ticket.github_issue_number,
+      comentarioDelUsuario('Confirmo que la solucion funciona. Gracias.'),
+    );
+    await cambiarAperturaDelIssue(c.env, ticket.github_issue_number, false);
+  }
+
+  const actualizado = await almacen.anadirRespuesta(id, null, { confirmada: true });
+  return c.json({ confirmada_at: actualizado?.confirmada_at ?? null });
 });
 
 rutas.get('/:id', requiereSesion, async (c) => {
@@ -323,6 +400,7 @@ rutas.get('/:id', requiereSesion, async (c) => {
     created_at: ticket.created_at,
     updated_at: ticket.updated_at,
     cerrada_at: ticket.cerrada_at ?? null,
+    confirmada_at: ticket.confirmada_at ?? null,
     // Aqui si va el hilo completo: es la pantalla donde el usuario lee lo que
     // le ha contestado el equipo.
     respuestas: ticket.respuestas ?? [],

@@ -130,7 +130,12 @@ export class Almacen {
       if (cambios.estado === 'resuelta' && !ticket.cerrada_at) {
         ticket.cerrada_at = new Date().toISOString();
       }
-      if (cambios.estado !== 'resuelta') ticket.cerrada_at = null;
+      // Si el equipo la saca de `resuelta`, la confirmacion del usuario deja
+      // de tener sentido: se referia a una solucion que ya no esta vigente.
+      if (cambios.estado !== 'resuelta') {
+        ticket.cerrada_at = null;
+        ticket.confirmada_at = null;
+      }
     }
 
     if (cambios.respuesta) {
@@ -153,12 +158,32 @@ export class Almacen {
    * esperar a que el webhook devuelva el comentario: el webhook ignora los
    * mensajes del propio usuario para no duplicarlos.
    */
-  async anadirRespuesta(ticketId: string, respuesta: RespuestaTicket): Promise<Ticket | null> {
+  async anadirRespuesta(
+    ticketId: string,
+    respuesta: RespuestaTicket | null,
+    cambios: { estado?: EstadoTicket; confirmada?: boolean } = {},
+  ): Promise<Ticket | null> {
     const ticket = await this.obtenerTicket(ticketId);
     if (!ticket) return null;
-    const respuestas = ticket.respuestas ?? [];
-    respuestas.push(respuesta);
-    ticket.respuestas = respuestas.slice(-50);
+    if (respuesta) {
+      const respuestas = ticket.respuestas ?? [];
+      respuestas.push(respuesta);
+      ticket.respuestas = respuestas.slice(-50);
+    }
+    // El estado y la respuesta se escriben juntos por lo mismo que en
+    // `aplicarEventoDeIssue`: separarlos deja una ventana en la que el usuario
+    // ve su mensaje con el estado viejo, o el estado nuevo sin el mensaje.
+    if (cambios.estado) {
+      ticket.estado = cambios.estado;
+      if (cambios.estado !== 'resuelta') {
+        ticket.cerrada_at = null;
+        ticket.confirmada_at = null;
+      }
+    }
+    if (cambios.confirmada) {
+      ticket.confirmada_at = new Date().toISOString();
+      if (!ticket.cerrada_at) ticket.cerrada_at = ticket.confirmada_at;
+    }
     ticket.updated_at = new Date().toISOString();
     await this.kv.put('ticket:' + ticketId, JSON.stringify(ticket));
     return ticket;
