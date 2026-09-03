@@ -14,7 +14,18 @@ import type { ResultadoLicencia } from './playBilling';
 export const PRODUCTO_SOPORTE_MS = 'support_unlock';
 
 const URL_COLECCIONES = 'https://collections.mp.microsoft.com/v6.0/collections/query';
-const AUDIENCIA = 'https://onestore.microsoft.com/.default';
+/**
+ * Hay DOS audiencias distintas y no son intercambiables (lo documenta
+ * Microsoft y lo confirma su libreria Microsoft.StoreServices):
+ *  - SERVICIO: el bearer con el que este Worker llama a la API de colecciones.
+ *    No debe salir de aqui nunca: expuesto al cliente permite ataques de
+ *    repeticion contra la API.
+ *  - CLAVE_COLECCIONES: el ticket que SI se manda a la app, porque WinRT lo
+ *    necesita para acunar la Store ID key. Solo sirve para acunar claves.
+ */
+export const AUDIENCIA_SERVICIO = 'https://onestore.microsoft.com';
+export const AUDIENCIA_CLAVE_COLECCIONES =
+  'https://onestore.microsoft.com/b2b/keys/create/collections';
 
 /** Un elemento de la coleccion (CollectionItemContractV6), recortado a lo usado. */
 export interface ElementoColeccion {
@@ -120,6 +131,7 @@ export async function tokenDeAcceso(
   tenantId: string,
   clientId: string,
   clientSecret: string,
+  audiencia: string = AUDIENCIA_SERVICIO,
 ): Promise<string> {
   if (!tenantId || !clientId || !clientSecret) {
     throw new Error(
@@ -136,7 +148,7 @@ export async function tokenDeAcceso(
         grant_type: 'client_credentials',
         client_id: clientId,
         client_secret: clientSecret,
-        scope: AUDIENCIA,
+        scope: `${audiencia}/.default`,
       }),
     },
   );

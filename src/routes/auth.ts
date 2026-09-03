@@ -14,7 +14,11 @@
 import { Hono } from 'hono';
 import { SignJWT } from 'jose';
 import { verificarLicenciaAndroid } from '../services/playBilling';
-import { tokenDeAcceso as tokenEntraID, verificarLicenciaWindows } from '../services/msStoreBilling';
+import {
+  AUDIENCIA_CLAVE_COLECCIONES,
+  tokenDeAcceso as tokenEntraID,
+  verificarLicenciaWindows,
+} from '../services/msStoreBilling';
 import { Almacen } from '../services/storage';
 import { requiereSesion } from '../middleware/auth';
 import { resolverIdentidad } from '../services/identidad';
@@ -246,10 +250,12 @@ rutas.post('/ms/ticket', async (c) => {
     );
   }
   try {
+    // Audiencia de acunado, no la del servicio: este ticket viaja hasta la app.
     const ticket = await tokenEntraID(
       c.env.MS_ENTRA_TENANT_ID,
       c.env.MS_ENTRA_CLIENT_ID,
       c.env.MS_ENTRA_CLIENT_SECRET,
+      AUDIENCIA_CLAVE_COLECCIONES,
     );
     return c.json({ ticket });
   } catch (e) {
