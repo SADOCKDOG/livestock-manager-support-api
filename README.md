@@ -26,6 +26,7 @@ livestock-manager-support-api/
 │   ├── services/
 │   │   ├── ai.ts                    # Estructuración del reporte y respuesta del agente
 │   │   ├── github.ts                # Auth de GitHub App, issues, etiquetas y apertura
+│   │   ├── identidad.ts             # A quién pertenece la compra (adopción y enlace)
 │   │   ├── playBilling.ts           # Verificación de compra Google Play
 │   │   └── storage.ts               # Lectura/escritura en KV
 │   ├── middleware/
@@ -36,6 +37,8 @@ livestock-manager-support-api/
 │       ├── errores.ts               # detalleError() — console.error se come e.message
 │       ├── sanitize.ts              # Limpieza de contenido antes de publicar
 │       └── verifyWebhookSignature.ts # Verificación HMAC del webhook
+├── test/
+│   └── identidad.test.ts            # node --test, con el borrado de tipos de Node
 ├── wrangler.toml                    # Configuración de Cloudflare Workers
 ├── package.json
 ├── tsconfig.json
@@ -101,13 +104,23 @@ id = "<generar con: wrangler kv:namespace create TICKETS_KV>"
 npm run dev
 ```
 
-### 6. Despliegue
+### 6. Comprobaciones antes de desplegar
+
+```bash
+npm run typecheck
+npm test
+```
+
+Las pruebas usan `node --test` con el borrado de tipos nativo de Node (>= 22):
+no hacen falta dependencias ni compilación previa.
+
+### 7. Despliegue
 
 ```bash
 npm run deploy
 ```
 
-### 7. Configurar el webhook en GitHub
+### 8. Configurar el webhook en GitHub
 
 En el repo de soporte dedicado: `Settings → Webhooks → Add webhook`
 - URL: `https://<tu-worker>.workers.dev/webhooks/github`
@@ -143,11 +156,26 @@ guardado en el almacén `meta` de su IndexedDB, y por tanto incluido en la copia
 de seguridad. El Worker lo indexa como `instalacion:<id> → user_id`.
 
 Cuando llega un token desconocido con un id de instalación ya visto, el Worker
-**no adopta la identidad anterior sin comprobarla**: vuelve a consultar a Google
-el token viejo y, si sigue activo, hay dos licencias vivas a la vez. Eso no es
-una recompra, son dos personas — alguien ha restaurado una copia ajena — y la
-adopción se rechaza. Si la consulta falla, también se rechaza: un enlace se
-puede reintentar, un historial enseñado a quien no es no se deshace.
+**no adopta la identidad anterior sin comprobarla**. Por orden:
+
+1. Si Google encadena la compra nueva con la anterior (`linkedPurchaseToken`),
+   es el mismo comprador y se adopta. Es la única prueba server-side de que dos
+   tokens distintos son la misma persona, y cubre el caso normal: recomprar
+   antes de que caduque la anterior, con las dos licencias vivas a la vez.
+2. Si no hay encadenamiento, se consulta a Google el token viejo. Caducado, se
+   adopta. Todavía activo, se rechaza: son dos personas — alguien ha restaurado
+   una copia ajena — y antes que enseñar un historial ajeno, historial vacío.
+3. Si la consulta falla, se rechaza también: un historial enseñado a quien no es
+   no se deshace.
+
+**Rechazar la adopción no puede tocar `instalacion:<id>`.** El enlace es el
+único camino de vuelta al historial: si se reescribe apuntando al usuario nuevo
+y vacío, la pérdida es permanente y ni restaurar la copia de seguridad la
+arregla, porque el id restaurado vuelve a llevar al mismo usuario vacío. Pasó en
+producción el 2026-09-03. Por eso la decisión vive aislada del KV en
+`src/services/identidad.ts`, con pruebas (`npm test`), y devuelve por separado
+la identidad y el permiso para escribir el enlace. Por la misma razón, un
+usuario ya conocido tampoco se queda con el enlace si apunta a otro.
 
 El `email` es opcional y solo sirve de último recurso manual. Se indexa como
 `email:<correo> → user_id` **solo si existe**; sin ese guardia todos los
