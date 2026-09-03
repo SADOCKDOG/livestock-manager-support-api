@@ -123,6 +123,20 @@ export class Almacen {
       cambios.estado === 'analizada' &&
       RANGO_ESTADO[ticket.estado] > RANGO_ESTADO.analizada;
 
+    // Un evento que no aporta nada no debe escribir. KV no tiene escrituras
+    // condicionales y sus lecturas van con retraso, asi que este metodo lee,
+    // modifica y guarda sobre una foto que puede ser vieja: si guarda igual,
+    // machaca lo que se haya escrito entre medias. Pasa de verdad. Al
+    // responder en una incidencia resuelta, la app escribe el mensaje y luego
+    // GitHub avisa de la reapertura y de la etiqueta; ese webhook llegaba con
+    // el ticket de antes y devolvia el hilo sin el mensaje recien enviado.
+    // Cuando el estado que trae el evento ya esta puesto y no hay respuesta
+    // nueva, no hay nada que guardar.
+    const sinCambios =
+      !cambios.respuesta &&
+      (!cambios.estado || retrocedeElAgente || cambios.estado === ticket.estado);
+    if (sinCambios) return ticket;
+
     if (cambios.estado && !retrocedeElAgente) {
       ticket.estado = cambios.estado;
       // La fecha de cierre se fija la primera vez y no se toca despues: si el
