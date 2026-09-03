@@ -130,6 +130,35 @@ En el repo de soporte dedicado: `Settings → Webhooks → Add webhook`
 Las rutas de lectura y de mensaje **no exigen licencia activa**, a propósito: quien
 ya abrió una incidencia puede seguir hablando de ella aunque su licencia caduque.
 
+## Identidad del usuario
+
+No hay cuentas ni contraseñas. El `user_id` son los 16 primeros bytes del
+`SHA-256("usuario:" + purchase_token)`, así que un borrado de datos o un móvil
+nuevo no pierden el historial: Google Play restaura el token y sale el mismo id.
+
+El `purchase_token` sí cambia en una **recompra** (la suscripción caduca y se
+vuelve a contratar, o se cambia de plan). Para no dejar huérfano el historial,
+la app manda además un **id de instalación** — generado en el dispositivo,
+guardado en el almacén `meta` de su IndexedDB, y por tanto incluido en la copia
+de seguridad. El Worker lo indexa como `instalacion:<id> → user_id`.
+
+Cuando llega un token desconocido con un id de instalación ya visto, el Worker
+**no adopta la identidad anterior sin comprobarla**: vuelve a consultar a Google
+el token viejo y, si sigue activo, hay dos licencias vivas a la vez. Eso no es
+una recompra, son dos personas — alguien ha restaurado una copia ajena — y la
+adopción se rechaza. Si la consulta falla, también se rechaza: un enlace se
+puede reintentar, un historial enseñado a quien no es no se deshace.
+
+El `email` es opcional y solo sirve de último recurso manual. Se indexa como
+`email:<correo> → user_id` **solo si existe**; sin ese guardia todos los
+usuarios sin correo compartían la clave `email:` y el último se la llevaba.
+
+| Clave en KV | Contenido |
+|---|---|
+| `usuario:<user_id>` | Ficha completa: correo, plataforma, token, licencia |
+| `instalacion:<id>` | `user_id` al que quedó vinculada esa instalación |
+| `email:<correo>` | `user_id`, solo para usuarios que hayan dado correo |
+
 ## Seguridad
 
 - Ningún token de GitHub llega nunca al cliente.
