@@ -16,6 +16,8 @@ export interface Env {
   GITHUB_REPO_NAME: string;
   MAX_TICKETS_PER_DAY: string;
   MAX_MENSAJES_PER_DAY?: string;
+  /** Tope de tickets de Microsoft Store por IP y hora. Por defecto 30. */
+  MAX_TICKETS_MS_POR_HORA?: string;
   /** Solo 'development' salta la verificacion de licencia. Nunca en produccion. */
   ENTORNO?: string;
 

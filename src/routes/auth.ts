@@ -249,6 +249,26 @@ rutas.post('/ms/ticket', async (c) => {
       501,
     );
   }
+  // Limite por IP: la ruta es abierta por necesidad (WinRT necesita el ticket
+  // antes de que exista sesion), asi que no hay user_id con el que limitar.
+  // Cada ticket es una llamada a Entra ID, y agotar esa cuota deja sin comprar
+  // a todo el mundo. El tope es generoso a proposito: la app revalida en cada
+  // arranque y varias personas pueden compartir IP.
+  const ip = c.req.header('CF-Connecting-IP') ?? '';
+  const almacenIP = new Almacen(c.env.TICKETS_KV);
+  if (ip) {
+    const maximo = parseInt(c.env.MAX_TICKETS_MS_POR_HORA ?? '30', 10) || 30;
+    if ((await almacenIP.contarAcunadosDeLaHora(ip)) >= maximo) {
+      return c.json(
+        {
+          error: 'Demasiados intentos. Prueba de nuevo dentro de un rato.',
+          codigo: 'LIMITE_TICKETS_MS',
+        },
+        429,
+      );
+    }
+  }
+
   try {
     // Audiencia de acunado, no la del servicio: este ticket viaja hasta la app.
     const ticket = await tokenEntraID(
@@ -257,6 +277,10 @@ rutas.post('/ms/ticket', async (c) => {
       c.env.MS_ENTRA_CLIENT_SECRET,
       AUDIENCIA_CLAVE_COLECCIONES,
     );
+    // Se cuenta despues de emitirlo: un fallo de Entra ID no debe gastar cupo.
+    if (ip) {
+      await almacenIP.incrementarAcunadosDeLaHora(ip);
+    }
     return c.json({ ticket });
   } catch (e) {
     console.error('[auth] fallo el ticket de Entra ID:', detalleError(e));

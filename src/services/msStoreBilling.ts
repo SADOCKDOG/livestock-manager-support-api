@@ -20,6 +20,8 @@ const URL_COLECCIONES = 'https://collections.mp.microsoft.com/v6.0/collections/q
  * contrato sin filtrar informacion del usuario.
  */
 const REFERENCIA = 'soporte';
+/** Tope de paginas de la coleccion: freno contra un bucle, no un limite esperado. */
+const MAX_PAGINAS = 20;
 /**
  * Hay DOS audiencias distintas y no son intercambiables (lo documenta
  * Microsoft y lo confirma su libreria Microsoft.StoreServices):
@@ -90,7 +92,12 @@ export function interpretarColeccion(
   const ordenados = [...nuestros].sort(
     (a, b) => (Date.parse(b.endDate ?? '') || 0) - (Date.parse(a.endDate ?? '') || 0),
   );
-  const item = ordenados[0];
+  // Un elemento revocado puede caducar DESPUES que la compra buena: quien pidio
+  // el reembolso de una anual y luego contrato una mensual tiene el revocado por
+  // delante. Ordenar solo por fecha le denegaria la licencia a quien acaba de
+  // pagar, asi que lo activo se examina primero; el resto solo sirve para
+  // explicar el motivo y conservar el ancla de identidad.
+  const item = ordenados.find((i) => i.status === 'Active') ?? ordenados[0];
   // Inalcanzable: nuestros.length > 0 garantiza ordenados[0], pero
   // noUncheckedIndexedAccess no lo sabe. Se mantiene la guarda por
   // coherencia con "sin verificacion no hay licencia".
@@ -130,7 +137,16 @@ export function interpretarColeccion(
 
 interface RespuestaColecciones {
   items?: ElementoColeccion[];
+  /** Lo manda Microsoft cuando quedan mas paginas por leer. */
+  continuationToken?: string;
 }
+
+/**
+ * Tokens vivos, uno por audiencia: las dos se piden en el mismo arranque y
+ * comparten cliente, asi que una sola casilla se pisaria a si misma. Mismo
+ * patron que playBilling.ts, con el que Android ya evita agotar la cuota.
+ */
+const tokensCacheados = new Map<string, { token: string; expira: number }>();
 
 /** Access token de Entra ID para la API de colecciones (client credentials). */
 export async function tokenDeAcceso(
@@ -145,6 +161,13 @@ export async function tokenDeAcceso(
         + 'cargalos con wrangler secret put --env production',
     );
   }
+  // Margen de un minuto: un token a punto de caducar puede vencer entre esta
+  // comprobacion y la llamada a Microsoft.
+  const vivo = tokensCacheados.get(audiencia);
+  if (vivo && vivo.expira > Date.now() + 60_000) {
+    return vivo.token;
+  }
+
   const respuesta = await fetch(
     `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
     {
@@ -162,8 +185,16 @@ export async function tokenDeAcceso(
     const texto = (await respuesta.text().catch(() => '')).slice(0, 300);
     throw new Error(`Entra ID rechazo la autenticacion (${respuesta.status}): ${texto}`);
   }
-  const datos = (await respuesta.json()) as { access_token?: string };
+  const datos = (await respuesta.json()) as { access_token?: string; expires_in?: number };
   if (!datos.access_token) throw new Error('Entra ID no devolvio access_token');
+  // Sin expires_in no se cachea: mas vale volver a pedirlo que servir un token
+  // caducado con una vigencia inventada.
+  if (datos.expires_in) {
+    tokensCacheados.set(audiencia, {
+      token: datos.access_token,
+      expira: Date.now() + datos.expires_in * 1000,
+    });
+  }
   return datos.access_token;
 }
 
@@ -179,32 +210,49 @@ export async function verificarLicenciaWindows(
   storeIdKey: string,
 ): Promise<LicenciaWindows> {
   const token = await tokenDeAcceso(tenantId, clientId, clientSecret);
-  const respuesta = await fetch(URL_COLECCIONES, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      maxPageSize: 100,
-      beneficiaries: [
-        { identityType: 'b2b', identityValue: storeIdKey, localTicketReference: REFERENCIA },
-      ],
-      // Obligatorio: sin el la API responde 400. 'Durable' es lo que devuelve
-      // un complemento de suscripcion; 'UnmanagedConsumable' se incluye por si
-      // el add-on cambiara de tipo. No se pide 'Application' porque solo
-      // traeria la propia app, que aqui no interesa.
-      productTypes: ['Durable', 'UnmanagedConsumable'],
-      // Imprescindible: por defecto la API solo devuelve lo vigente. Sin esto
-      // una licencia caducada seria indistinguible de no haber comprado nunca,
-      // y se perderia el ancla de identidad que reencuentra el historial.
-      validityType: 'All',
-    }),
-  });
-  if (!respuesta.ok) {
-    const texto = (await respuesta.text().catch(() => '')).slice(0, 300);
-    throw new Error(`La API de colecciones respondio ${respuesta.status}: ${texto}`);
+  const acumulados: ElementoColeccion[] = [];
+  let continuacion: string | undefined;
+  // La respuesta viene paginada. La primera pagina bastaria casi siempre, pero
+  // al pedir validityType 'All' entran tambien los periodos ya caducados: una
+  // suscripcion mensual acumula un elemento por renovacion y acaba desbordando
+  // la pagina. Sin recorrerlas todas, un comprador antiguo perderia la licencia
+  // y, con ella, el ancla de identidad.
+  for (let pagina = 0; pagina < MAX_PAGINAS; pagina += 1) {
+    const respuesta = await fetch(URL_COLECCIONES, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        maxPageSize: 100,
+        ...(continuacion ? { continuationToken: continuacion } : {}),
+        beneficiaries: [
+          { identityType: 'b2b', identityValue: storeIdKey, localTicketReference: REFERENCIA },
+        ],
+        // Obligatorio: sin el la API responde 400. 'Durable' es lo que devuelve
+        // un complemento de suscripcion; 'UnmanagedConsumable' se incluye por si
+        // el add-on cambiara de tipo. No se pide 'Application' porque solo
+        // traeria la propia app, que aqui no interesa.
+        productTypes: ['Durable', 'UnmanagedConsumable'],
+        // Imprescindible: por defecto la API solo devuelve lo vigente. Sin esto
+        // una licencia caducada seria indistinguible de no haber comprado nunca,
+        // y se perderia el ancla de identidad que reencuentra el historial.
+        validityType: 'All',
+      }),
+    });
+    if (!respuesta.ok) {
+      const texto = (await respuesta.text().catch(() => '')).slice(0, 300);
+      throw new Error(`La API de colecciones respondio ${respuesta.status}: ${texto}`);
+    }
+    const datos = (await respuesta.json()) as RespuestaColecciones;
+    acumulados.push(...(datos.items ?? []));
+    if (!datos.continuationToken) {
+      return interpretarColeccion(acumulados);
+    }
+    continuacion = datos.continuationToken;
   }
-  const datos = (await respuesta.json()) as RespuestaColecciones;
-  return interpretarColeccion(datos.items ?? []);
+  // Microsoft sigue ofreciendo paginas pasado el tope. Se para y se lanza: con
+  // una lectura incompleta no se puede afirmar que no hay licencia.
+  throw new Error(`La API de colecciones no dejo de paginar tras ${MAX_PAGINAS} paginas`);
 }

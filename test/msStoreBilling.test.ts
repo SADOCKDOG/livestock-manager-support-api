@@ -90,3 +90,41 @@ test('dos compras del mismo complemento: gana la que caduca mas tarde', () => {
   assert.equal(r.activa, true);
   assert.equal(r.order_id, 'nueva');
 });
+
+test('un revocado que caduca mas tarde no tapa a la compra activa', () => {
+  // Reembolso de una anual y recontratacion mensual: el revocado tiene el
+  // endDate mas lejano. Ordenar solo por fecha denegaria la licencia a quien
+  // acaba de pagar.
+  const r = interpretarColeccion(
+    [
+      elemento({ status: 'Revoked', endDate: '2027-09-01T00:00:00.000Z', orderId: 'reembolsada' }),
+      elemento({ status: 'Active', endDate: '2026-10-01T00:00:00.000Z', orderId: 'mensual' }),
+    ],
+    AHORA,
+  );
+  assert.equal(r.activa, true);
+  assert.equal(r.order_id, 'mensual');
+});
+
+test('sin ninguna activa, el revocado sigue explicando el motivo y da el ancla', () => {
+  const r = interpretarColeccion(
+    [elemento({ status: 'Revoked', endDate: '2027-09-01T00:00:00.000Z' })],
+    AHORA,
+  );
+  assert.equal(r.activa, false);
+  assert.match(r.motivo ?? '', /revocada|reembolsada/);
+  assert.equal(r.instalacion_declarada, INSTALACION);
+});
+
+test('varias activas: entre ellas sigue ganando la que caduca mas tarde', () => {
+  const r = interpretarColeccion(
+    [
+      elemento({ endDate: '2026-10-01T00:00:00.000Z', orderId: 'corta' }),
+      elemento({ endDate: '2027-09-01T00:00:00.000Z', orderId: 'larga' }),
+      elemento({ status: 'Revoked', endDate: '2028-01-01T00:00:00.000Z', orderId: 'revocada' }),
+    ],
+    AHORA,
+  );
+  assert.equal(r.activa, true);
+  assert.equal(r.order_id, 'larga');
+});
