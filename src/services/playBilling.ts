@@ -109,6 +109,14 @@ export interface ResultadoLicencia {
   /** true si es suscripcion; false si es compra unica. */
   es_suscripcion: boolean;
   /**
+   * `linkedPurchaseToken`: el token al que sustituye esta compra. Google lo
+   * rellena cuando el mismo comprador recompra o cambia de plan, y es la unica
+   * prueba server-side de que dos purchase_token distintos son la misma
+   * persona. Sin el no se puede distinguir una recompra de dos ganaderos
+   * distintos, y el historial de soporte depende de esa distincion.
+   */
+  token_anterior: string | null;
+  /**
    * Solo en suscripciones. true = Google cobrara de nuevo en `expira`; false =
    * el usuario la ha cancelado y `expira` es la fecha en que pierde el acceso.
    * Sin este dato la app tendria que ensenar la misma frase en los dos casos,
@@ -142,6 +150,7 @@ export async function verificarLicenciaAndroid(
       motivo: 'La compra no existe',
       es_suscripcion: SOPORTE_ES_SUSCRIPCION,
       renovacion_automatica: null,
+      token_anterior: null,
     };
   }
   if (!respuesta.ok) {
@@ -159,6 +168,7 @@ export async function verificarLicenciaAndroid(
       expiryTimeMillis?: string;
       paymentState?: number;
       autoRenewing?: boolean;
+      linkedPurchaseToken?: string;
     };
     const expiraMs = Number(sub.expiryTimeMillis ?? 0);
     const vigente = expiraMs > Date.now();
@@ -170,6 +180,7 @@ export async function verificarLicenciaAndroid(
       // Google omite el campo en algunos estados; se toma como cancelada solo
       // si viene explicitamente en false, no si falta.
       renovacion_automatica: sub.autoRenewing === undefined ? null : sub.autoRenewing,
+      token_anterior: sub.linkedPurchaseToken ?? null,
     };
   }
 
@@ -177,6 +188,7 @@ export async function verificarLicenciaAndroid(
   const compra = (await respuesta.json()) as {
     purchaseState?: number;
     consumptionState?: number;
+    obfuscatedExternalAccountId?: string;
   };
   const comprada = compra.purchaseState === 0;
   return {
@@ -185,5 +197,7 @@ export async function verificarLicenciaAndroid(
     motivo: comprada ? undefined : 'La compra fue cancelada o reembolsada',
     es_suscripcion: false,
     renovacion_automatica: null,
+    // La compra unica no sustituye a ninguna otra: no hay token encadenado.
+    token_anterior: null,
   };
 }
