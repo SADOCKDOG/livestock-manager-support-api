@@ -16,6 +16,7 @@ import { SignJWT } from 'jose';
 import { verificarLicenciaAndroid } from '../services/playBilling';
 import { Almacen } from '../services/storage';
 import { requiereSesion } from '../middleware/auth';
+import { detalleError } from '../utils/errores';
 import type { Env, Plataforma, Usuario, Variables } from '../types';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -56,6 +57,10 @@ rutas.post('/verify-purchase', async (c) => {
   const purchaseToken = cuerpo?.purchase_token;
   const plataforma: Plataforma = cuerpo?.plataforma === 'web' ? 'web' : 'android';
   const email = typeof cuerpo?.email === 'string' ? cuerpo.email.trim().toLowerCase() : '';
+  const instalacion =
+    typeof cuerpo?.instalacion === 'string' && /^[a-zA-Z0-9-]{8,64}$/.test(cuerpo.instalacion)
+      ? cuerpo.instalacion
+      : '';
 
   if (typeof purchaseToken !== 'string' || purchaseToken.length < 10) {
     return c.json({ error: 'Falta el token de compra' }, 400);
@@ -95,18 +100,39 @@ rutas.post('/verify-purchase', async (c) => {
 
   // La identidad se ancla al token de compra: es estable y lo emite Google.
   const almacen = new Almacen(c.env.TICKETS_KV);
-  const userId = await hashUserId(purchaseToken);
-  const existente = await almacen.obtenerUsuario(userId);
+  const userIdDelToken = await hashUserId(purchaseToken);
+  let userId = userIdDelToken;
+  let existente = await almacen.obtenerUsuario(userIdDelToken);
+
+  // Anclarla solo al token tiene un agujero: cuando la suscripcion caduca y se
+  // vuelve a comprar, Google emite otro purchase_token, el hash cambia y el
+  // ganadero aparece como usuario nuevo con el historial de incidencias vacio.
+  // El id de instalacion lo arregla porque vive en la base de datos de la app,
+  // que la recompra no toca.
+  if (!existente && instalacion) {
+    const anterior = await almacen.obtenerUsuarioPorInstalacion(instalacion);
+    if (anterior && anterior !== userIdDelToken) {
+      const adoptado = await adoptarIdentidadAnterior(c.env, almacen, anterior, purchaseToken);
+      if (adoptado) {
+        userId = anterior;
+        existente = adoptado;
+      }
+    }
+  }
 
   const usuario: Usuario = {
     user_id: userId,
-    email: email || existente?.email || '',
+    // `actualizar_email` distingue al usuario editando el campo en Ajustes del
+    // arranque normal, que manda el correo vacio y borraria el guardado.
+    email: cuerpo?.actualizar_email ? email : email || existente?.email || '',
     plataforma,
     purchase_token: purchaseToken,
+    instalacion_id: instalacion || existente?.instalacion_id || null,
     licencia_soporte_activa: true,
     licencia_expira: resultado.expira,
   };
   await almacen.guardarUsuario(usuario);
+  if (instalacion) await almacen.vincularInstalacion(instalacion, userId);
 
   const sesion = await emitirSesion(c.env.JWT_SECRET, usuario);
   return c.json({
@@ -131,6 +157,47 @@ rutas.get('/me', requiereSesion, async (c) => {
     },
   });
 });
+
+/**
+ * Decide si el usuario que trae esta instalacion puede quedarse con la
+ * identidad anterior. Se comprueba que la licencia vieja ya no este viva: dos
+ * licencias activas a la vez no son una recompra, son dos personas, y pasa si
+ * alguien restaura en su movil la copia de seguridad de otro. En ese caso se
+ * prefiere un usuario nuevo y vacio antes que ensenarle el historial ajeno.
+ *
+ * Ante un fallo consultando a Google se responde que no: el enlace se puede
+ * reintentar en el siguiente arranque, pero un historial mostrado a quien no
+ * toca no se puede deshacer.
+ */
+async function adoptarIdentidadAnterior(
+  env: Env,
+  almacen: Almacen,
+  userIdAnterior: string,
+  purchaseTokenNuevo: string,
+): Promise<Usuario | null> {
+  const anterior = await almacen.obtenerUsuario(userIdAnterior);
+  if (!anterior) return null;
+
+  const tokenViejo = anterior.purchase_token;
+  if (!tokenViejo || tokenViejo === purchaseTokenNuevo) return anterior;
+
+  try {
+    const vieja = await verificarLicenciaAndroid(
+      env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON,
+      PAQUETE_ANDROID,
+      tokenViejo,
+    );
+    if (vieja.activa) {
+      console.warn('[auth] instalacion compartida entre dos licencias vivas');
+      return null;
+    }
+  } catch (e) {
+    console.error('[auth] no se pudo comprobar la licencia anterior:', detalleError(e));
+    return null;
+  }
+
+  return anterior;
+}
 
 /**
  * user_id derivado del purchase_token. Se hashea para no usar el token de

@@ -43,7 +43,23 @@ export class Almacen {
 
   async guardarUsuario(usuario: Usuario): Promise<void> {
     await this.kv.put(`usuario:${usuario.user_id}`, JSON.stringify(usuario));
-    await this.kv.put(`email:${usuario.email.toLowerCase()}`, usuario.user_id);
+    // Sin este guardia, los usuarios sin correo compartian todos la clave
+    // `email:` y el ultimo en registrarse se llevaba la de los demas.
+    if (usuario.email) {
+      await this.kv.put(`email:${usuario.email.toLowerCase()}`, usuario.user_id);
+    }
+  }
+
+  /**
+   * user_id al que quedo vinculada una instalacion de la app. Es lo que permite
+   * reconocer al mismo ganadero cuando Google le da un purchase_token nuevo.
+   */
+  async obtenerUsuarioPorInstalacion(instalacionId: string): Promise<string | null> {
+    return this.kv.get(`instalacion:${instalacionId}`, 'text');
+  }
+
+  async vincularInstalacion(instalacionId: string, userId: string): Promise<void> {
+    await this.kv.put(`instalacion:${instalacionId}`, userId);
   }
 
   // --- Borradores (previos a la confirmacion del usuario) -------------------

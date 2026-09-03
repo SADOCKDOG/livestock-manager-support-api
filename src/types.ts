@@ -116,6 +116,14 @@ export interface Usuario {
   plataforma: Plataforma;
   /** Token de compra de Play (android) o id de suscripcion de Stripe (web). */
   purchase_token?: string;
+  /**
+   * Identificador de la instalacion de la app, generado en el dispositivo y
+   * guardado en el almacen `meta` de IndexedDB, asi que viaja en la copia de
+   * seguridad. Sirve para reencontrar al mismo usuario cuando Google emite un
+   * purchase_token nuevo (recompra tras caducar, cambio de plan), que de otro
+   * modo daria un user_id distinto y dejaria el historial huerfano.
+   */
+  instalacion_id?: string | null;
   licencia_soporte_activa: boolean;
   /** ISO 8601. null = compra unica sin caducidad. */
   licencia_expira: string | null;
