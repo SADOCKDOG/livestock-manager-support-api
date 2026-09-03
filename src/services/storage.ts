@@ -15,6 +15,7 @@
  * importar, el contador deberia moverse a Durable Objects o D1.
  */
 
+import { RANGO_ESTADO } from '../types';
 import type {
   BorradorTicket,
   EstadoTicket,
@@ -112,7 +113,17 @@ export class Almacen {
     const ticket = await this.obtenerTicket(ticketId);
     if (!ticket) return null;
 
-    if (cambios.estado) {
+    // 'analizada' lo pone el agente de IA, que responde a los pocos segundos
+    // de crearse la incidencia. Los eventos de GitHub no llegan ordenados: si
+    // el mantenedor ya la habia movido a mano, aplicarlo tal cual la haria
+    // retroceder y el usuario veria «nadie la ha mirado» despues de haber
+    // hablado con una persona. Solo se protege de esto el estado automatico;
+    // lo que decide una persona manda siempre, incluso hacia atras.
+    const retrocedeElAgente =
+      cambios.estado === 'analizada' &&
+      RANGO_ESTADO[ticket.estado] > RANGO_ESTADO.analizada;
+
+    if (cambios.estado && !retrocedeElAgente) {
       ticket.estado = cambios.estado;
       // La fecha de cierre se fija la primera vez y no se toca despues: si el
       // mantenedor reabre y vuelve a cerrar, interesa cuando quedo resuelta.

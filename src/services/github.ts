@@ -179,8 +179,46 @@ export async function crearIssue(env: Env, datos: DatosIssue): Promise<number> {
 }
 
 /**
+ * Cambia la etiqueta de estado del issue: quita la anterior y pone la nueva.
+ *
+ * Hay que quitar la vieja, no solo anadir: `estadoDesdePayload` recorre las
+ * etiquetas y se queda con la primera que reconoce, y GitHub no garantiza el
+ * orden del array. Con `estado:enviada` y `estado:analizada` a la vez, el
+ * estado que ve el usuario dependeria del azar.
+ *
+ * Si la etiqueta nueva no existe en el repo, GitHub la crea al asignarla.
+ *
+ * Esto es lo mas parecido a «el agente se asigna la incidencia» que permite
+ * GitHub: una GitHub App no puede figurar como `assignee`, ese campo solo
+ * admite cuentas de persona. La etiqueta deja la misma marca visible en el
+ * tablero del mantenedor.
+ */
+export async function reemplazarEtiquetaDeEstado(
+  env: Env,
+  numero: number,
+  anterior: string,
+  nueva: string,
+): Promise<void> {
+  const base = `/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/issues/${numero}`;
+
+  // Un 404 aqui es lo normal si la etiqueta anterior ya no estaba puesta.
+  await peticionGitHub(env, `${base}/labels/${encodeURIComponent(anterior)}`, {
+    method: 'DELETE',
+  }).catch(() => undefined);
+
+  const respuesta = await peticionGitHub(env, `${base}/labels`, {
+    method: 'POST',
+    body: JSON.stringify({ labels: [nueva] }),
+  });
+  if (!respuesta.ok) {
+    console.warn('[github] no se pudo etiquetar el issue', numero, respuesta.status);
+  }
+}
+
+/**
  * Anade un comentario al issue. Se usa para la hipotesis tecnica de la IA, que
- * va separada del cuerpo para que se lea como lo que es: una sugerencia.
+ * va separada del cuerpo para que se lea como lo que es: una sugerencia, y
+ * para la respuesta del agente, que si llega al usuario.
  */
 export async function comentarIssue(
   env: Env,

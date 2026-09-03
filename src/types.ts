@@ -34,8 +34,24 @@ export interface Env {
   STRIPE_SECRET_KEY?: string;
 }
 
-/** Estados internos del ticket. Se traducen a espanol en la app. */
-export type EstadoTicket = 'enviada' | 'revision' | 'curso' | 'resuelta';
+/**
+ * Estados internos del ticket. Se traducen a espanol en la app.
+ *
+ * Van de menos a mas avanzado y ese orden importa: `RANGO_ESTADO` lo usa para
+ * que el agente de IA nunca haga retroceder un ticket que una persona ya ha
+ * movido. 'analizada' es el unico que pone la maquina: significa que el agente
+ * lo ha leido y ha contestado, y que ninguna persona lo ha visto todavia.
+ */
+export type EstadoTicket = 'enviada' | 'analizada' | 'revision' | 'curso' | 'resuelta';
+
+/** Progreso de cada estado. Solo se compara; los numeros no salen de aqui. */
+export const RANGO_ESTADO: Record<EstadoTicket, number> = {
+  enviada: 0,
+  analizada: 1,
+  revision: 2,
+  curso: 3,
+  resuelta: 4,
+};
 
 export type Severidad = 'alta' | 'media' | 'baja';
 
@@ -43,12 +59,12 @@ export type Severidad = 'alta' | 'media' | 'baja';
 export type Plataforma = 'android' | 'web';
 
 /**
- * Respuesta del equipo a una incidencia.
+ * Respuesta a una incidencia.
  *
  * Nace de un comentario en el issue, pero el usuario nunca ve GitHub: no se
  * guarda ni el login del autor ni el numero del comentario, solo lo que hay
- * que ensenar. Los comentarios del propio bot (la hipotesis de la IA) no
- * llegan hasta aqui: se filtran en el webhook.
+ * que ensenar. La hipotesis tecnica de la IA no llega hasta aqui: se filtra en
+ * el webhook por no llevar el marcador del agente.
  */
 export interface RespuestaTicket {
   /** ISO 8601. */
@@ -56,6 +72,13 @@ export interface RespuestaTicket {
   texto: string;
   /** true si acompana al cierre de la incidencia. */
   cierre?: boolean;
+  /**
+   * Quien escribe. La app lo rotula distinto porque no es lo mismo: 'ia' es un
+   * primer analisis automatico y 'equipo' es una persona. Opcional porque los
+   * tickets anteriores al agente no lo tienen; al leerlo, ausente = 'equipo',
+   * que es lo que eran todas las respuestas hasta ahora.
+   */
+  autor?: 'ia' | 'equipo';
 }
 
 /** Registro de ticket en KV. */

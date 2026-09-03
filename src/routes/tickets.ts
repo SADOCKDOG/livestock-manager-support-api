@@ -12,13 +12,14 @@
  */
 
 import { Hono } from 'hono';
-import { estructurarReporte } from '../services/ai';
-import { comentarIssue, crearIssue } from '../services/github';
+import { estructurarReporte, redactarRespuestaInicial } from '../services/ai';
+import { comentarIssue, crearIssue, reemplazarEtiquetaDeEstado } from '../services/github';
+import { ACUSE_DE_RESERVA, comentarioDelAgente } from '../utils/agente';
 import { Almacen } from '../services/storage';
 import { requiereLicencia, requiereSesion } from '../middleware/auth';
 import { limitarTickets } from '../middleware/rateLimit';
 import { bloqueContexto, limpiarPasos, limpiarTexto, limpiarTitulo, LIMITES } from '../utils/sanitize';
-import type { ContextoApp, Env, Severidad, Ticket, Variables } from '../types';
+import type { BorradorTicket, ContextoApp, Env, Severidad, Ticket, Variables } from '../types';
 import { detalleError } from '../utils/errores';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -55,6 +56,38 @@ function componerCuerpoIssue(
     '_Incidencia enviada desde la app y validada por la persona que la reporta._',
   );
   return partes.join('\n');
+}
+
+/**
+ * Todo lo que el agente hace despues de crear el issue.
+ *
+ * Corre en `waitUntil`, fuera de la respuesta HTTP: son dos llamadas a la IA y
+ * a GitHub que sumaban segundos a la espera del movil sin que el usuario gane
+ * nada, porque el resultado le llega igualmente por el webhook.
+ *
+ * Nunca lanza. Si algo falla, el ticket ya esta creado y el mantenedor lo vera
+ * en GitHub como siempre: el agente es un extra, no un eslabon del que dependa
+ * que la incidencia exista.
+ */
+async function agenteResponde(
+  env: Env,
+  numeroIssue: number,
+  borrador: BorradorTicket,
+  contexto: ContextoApp,
+): Promise<void> {
+  try {
+    // Si la IA no da nada util se publica el acuse fijo: el usuario merece
+    // saber que su incidencia llego, aunque el modelo se haya caido.
+    const texto = (await redactarRespuestaInicial(env.AI, borrador, contexto)) ?? ACUSE_DE_RESERVA;
+    await comentarIssue(env, numeroIssue, comentarioDelAgente(texto));
+
+    // La etiqueta va DESPUES del comentario. Al reves, el webhook del
+    // etiquetado llegaria primero y el usuario veria «analizada» un rato antes
+    // de tener nada que leer.
+    await reemplazarEtiquetaDeEstado(env, numeroIssue, 'estado:enviada', 'estado:analizada');
+  } catch (e) {
+    console.warn('[tickets] el agente no pudo responder al issue', numeroIssue, detalleError(e));
+  }
 }
 
 /**
@@ -155,6 +188,12 @@ rutas.post('/confirm', requiereSesion, requiereLicencia, limitarTickets, async (
       `**Hipotesis generada automaticamente** (sin verificar):\n\n${borrador.posible_causa}`,
     );
   }
+
+  // El agente lee, contesta y marca la incidencia como analizada. Va en
+  // segundo plano; la respuesta al movil no espera por el.
+  c.executionCtx.waitUntil(
+    agenteResponde(c.env, numeroIssue, { ...borrador, titulo, descripcion, pasos_reproduccion: pasos }, contexto),
+  );
 
   const ahora = new Date().toISOString();
   const ticket: Ticket = {
