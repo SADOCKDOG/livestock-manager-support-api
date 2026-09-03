@@ -148,3 +148,45 @@ test('un usuario conocido no se queda con el enlace de otro', async () => {
   assert.equal(r.userId, 'yo');
   assert.equal(r.vincularInstalacion, false);
 });
+
+// --- Windows: mismo motor de decision, otra ancla -----------------------------
+
+test('windows: recompra tras caducar adopta el historial', async () => {
+  const r = await resolverIdentidad({
+    lectura: lectura({ viejo: usuario('viejo', 'ms:pedido-viejo') }, { [INSTALACION]: 'viejo' }),
+    userIdDelToken: 'nuevo',
+    purchaseToken: 'ms:pedido-nuevo',
+    instalacion: INSTALACION,
+    // Microsoft no encadena compras: aqui nunca hay tokenEncadenado.
+    comprobarLicencia: async () => ({ activa: false }),
+  });
+  assert.equal(r.userId, 'viejo');
+  assert.equal(r.motivo, 'licencia-anterior-caducada');
+});
+
+test('windows: la compra anterior sigue viva: historial vacio, enlace intacto', async () => {
+  const r = await resolverIdentidad({
+    lectura: lectura({ viejo: usuario('viejo', 'ms:pedido-viejo') }, { [INSTALACION]: 'viejo' }),
+    userIdDelToken: 'nuevo',
+    purchaseToken: 'ms:pedido-nuevo',
+    instalacion: INSTALACION,
+    comprobarLicencia: async () => ({ activa: true }),
+  });
+  assert.equal(r.userId, 'nuevo');
+  assert.equal(r.vincularInstalacion, false);
+  assert.equal(r.motivo, 'dos-licencias-vivas');
+});
+
+test('windows: si la API de colecciones no responde, el enlace se queda', async () => {
+  const r = await resolverIdentidad({
+    lectura: lectura({ viejo: usuario('viejo', 'ms:pedido-viejo') }, { [INSTALACION]: 'viejo' }),
+    userIdDelToken: 'nuevo',
+    purchaseToken: 'ms:pedido-nuevo',
+    instalacion: INSTALACION,
+    comprobarLicencia: async () => {
+      throw new Error('503');
+    },
+  });
+  assert.equal(r.vincularInstalacion, false);
+  assert.equal(r.motivo, 'comprobacion-fallida');
+});

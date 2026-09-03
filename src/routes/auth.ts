@@ -14,7 +14,7 @@
 import { Hono } from 'hono';
 import { SignJWT } from 'jose';
 import { verificarLicenciaAndroid } from '../services/playBilling';
-import { tokenDeAcceso as tokenEntraID } from '../services/msStoreBilling';
+import { tokenDeAcceso as tokenEntraID, verificarLicenciaWindows } from '../services/msStoreBilling';
 import { Almacen } from '../services/storage';
 import { requiereSesion } from '../middleware/auth';
 import { resolverIdentidad } from '../services/identidad';
@@ -57,7 +57,10 @@ async function emitirSesion(
 rutas.post('/verify-purchase', async (c) => {
   const cuerpo = await c.req.json().catch(() => null);
   const purchaseToken = cuerpo?.purchase_token;
-  const plataforma: Plataforma = cuerpo?.plataforma === 'web' ? 'web' : 'android';
+  const plataforma: Plataforma =
+    cuerpo?.plataforma === 'web' ? 'web'
+    : cuerpo?.plataforma === 'windows' ? 'windows'
+    : 'android';
   const email = typeof cuerpo?.email === 'string' ? cuerpo.email.trim().toLowerCase() : '';
   const instalacion =
     typeof cuerpo?.instalacion === 'string' && /^[a-zA-Z0-9-]{8,64}$/.test(cuerpo.instalacion)
@@ -79,6 +82,84 @@ rutas.post('/verify-purchase', async (c) => {
       },
       501,
     );
+  }
+
+  if (plataforma === 'windows') {
+    // En windows `purchase_token` transporta la Store ID key, no un token de
+    // compra: es lo unico que prueba algo, y caduca a los 30 dias.
+    const claveStore = purchaseToken;
+    if (!c.env.MS_ENTRA_TENANT_ID || !c.env.MS_ENTRA_CLIENT_ID || !c.env.MS_ENTRA_CLIENT_SECRET) {
+      return c.json(
+        {
+          error: 'La compra en Microsoft Store todavia no esta disponible',
+          codigo: 'MS_STORE_NO_CONFIGURADO',
+        },
+        501,
+      );
+    }
+
+    let licencia;
+    try {
+      licencia = await verificarLicenciaWindows(
+        c.env.MS_ENTRA_TENANT_ID,
+        c.env.MS_ENTRA_CLIENT_ID,
+        c.env.MS_ENTRA_CLIENT_SECRET,
+        claveStore,
+      );
+    } catch (e) {
+      console.error('[auth] fallo la verificacion con Microsoft Store:', detalleError(e));
+      return c.json({ error: 'No se pudo verificar la compra ahora mismo' }, 502);
+    }
+
+    if (!licencia.activa || !licencia.order_id) {
+      return c.json(
+        { error: licencia.motivo ?? 'La compra no es valida', codigo: 'COMPRA_NO_VALIDA' },
+        403,
+      );
+    }
+
+    // La instalacion que declaro el cliente al acunar la clave vuelve firmada
+    // por Microsoft. Si no coincide con la que dice ahora, manda la que
+    // Microsoft confirma.
+    const instalacionWin = licencia.instalacion_declarada ?? instalacion;
+
+    const almacen = new Almacen(c.env.TICKETS_KV);
+    const userIdDelToken = await hashUserIdWindows(licencia.order_id);
+    const { userId, existente, vincularInstalacion, motivo } = await resolverIdentidad({
+      lectura: almacen,
+      userIdDelToken,
+      purchaseToken: licencia.order_id,
+      instalacion: instalacionWin,
+      // Microsoft no expone equivalente a linkedPurchaseToken: la recompra
+      // encadenada nunca se dispara aqui y cae en licencia-anterior-caducada,
+      // que es el comportamiento correcto.
+      tokenEncadenado: null,
+      // No se puede reconsultar una compra ajena: la coleccion se consulta por
+      // comprador, no por pedido. La compra anterior de ESTA instalacion estaba
+      // en la coleccion que se acaba de leer, asi que si no ha salido como
+      // activa es que no lo esta.
+      comprobarLicencia: async () => ({ activa: false }),
+    });
+    if (motivo !== 'usuario-conocido' && motivo !== 'instalacion-nueva') {
+      console.log(`[auth] identidad resuelta (windows): ${motivo}`);
+    }
+
+    const usuarioWin: Usuario = {
+      user_id: userId,
+      email: cuerpo?.actualizar_email ? email : email || existente?.email || '',
+      plataforma: 'windows',
+      purchase_token: licencia.order_id,
+      instalacion_id: instalacionWin || existente?.instalacion_id || null,
+      licencia_soporte_activa: true,
+      licencia_expira: licencia.expira,
+    };
+    await almacen.guardarUsuario(usuarioWin);
+    if (instalacionWin && vincularInstalacion) {
+      await almacen.vincularInstalacion(instalacionWin, userId);
+    }
+
+    const sesionWin = await emitirSesion(c.env.JWT_SECRET, usuarioWin);
+    return c.json({ ...sesionWin, licencia: { activa: true, expira: licencia.expira } });
   }
 
   let resultado;
@@ -194,17 +275,30 @@ rutas.get('/me', requiereSesion, async (c) => {
   });
 });
 
+async function hashDe(texto: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', codificador.encode(texto));
+  return Array.from(new Uint8Array(digest))
+    .slice(0, 16)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 /**
  * user_id derivado del purchase_token. Se hashea para no usar el token de
  * compra como identificador en claro por todo el almacenamiento.
  */
 async function hashUserId(purchaseToken: string): Promise<string> {
-  const datos = codificador.encode(`usuario:${purchaseToken}`);
-  const digest = await crypto.subtle.digest('SHA-256', datos);
-  return Array.from(new Uint8Array(digest))
-    .slice(0, 16)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  return hashDe(`usuario:${purchaseToken}`);
+}
+
+/**
+ * user_id de Windows. Se ancla al orderId de la compra en Microsoft Store, que
+ * es lo unico estable y por comprador que devuelve la API de colecciones: el
+ * purchaseToken de la Digital Goods API es el id del complemento e igual para
+ * todo el mundo. El prefijo 'ms:' evita cualquier colision con Android.
+ */
+async function hashUserIdWindows(orderId: string): Promise<string> {
+  return hashDe(`usuario:ms:${orderId}`);
 }
 
 export default rutas;
