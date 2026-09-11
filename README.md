@@ -10,7 +10,8 @@ Repo independiente de `LIVESTOCK-MANAGER` y `livestock-pwa-msix`: no comparte hi
 - **Almacenamiento**: Cloudflare KV (mapeo tickets) — migrar a D1 si se necesita consulta relacional más adelante
 - **IA**: Workers AI (`env.AI`), modelo `@cf/meta/llama-3.3-70b-instruct-fp8-fast` — sin API key propia ni proveedor externo
 - **GitHub**: GitHub App (permisos `Issues: Read & Write` únicamente)
-- **Verificación de compra**: Google Play Developer API
+- **Verificación de compra**: Google Play Developer API (Android) y Microsoft Store
+  Collection API vía Entra ID (Windows)
 
 ## Estructura del proyecto
 
@@ -28,6 +29,7 @@ livestock-manager-support-api/
 │   │   ├── github.ts                # Auth de GitHub App, issues, etiquetas y apertura
 │   │   ├── identidad.ts             # A quién pertenece la compra (adopción y enlace)
 │   │   ├── playBilling.ts           # Verificación de compra Google Play
+│   │   ├── msStoreBilling.ts        # Verificación de compra Microsoft Store (Entra ID)
 │   │   └── storage.ts               # Lectura/escritura en KV
 │   ├── middleware/
 │   │   ├── auth.ts                  # Validación de JWT de sesión
@@ -86,6 +88,20 @@ wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
 wrangler secret put JWT_SECRET
 ```
 
+Y, para la compra en Microsoft Store (app de escritorio), los tres de la
+aplicación registrada en Entra ID:
+
+```bash
+wrangler secret put MS_ENTRA_TENANT_ID
+wrangler secret put MS_ENTRA_CLIENT_ID
+wrangler secret put MS_ENTRA_CLIENT_SECRET
+```
+
+Van como **secretos**, nunca como `[vars]` de `wrangler.toml`: una var vacía
+pisa al secreto del mismo nombre y deja el servicio sin verificar compras. Si
+falta cualquiera de los tres, las rutas de Windows responden `501
+MS_STORE_NO_CONFIGURADO` en vez de fallar a ciegas.
+
 ### 4. Configurar `wrangler.toml`
 
 ```toml
@@ -137,7 +153,9 @@ En el repo de soporte dedicado: `Settings → Webhooks → Add webhook`
 | `GET` | `/tickets/:id` | JWT | Detalle con el hilo completo |
 | `POST` | `/tickets/:id/responder` | JWT | Mensaje del usuario en una incidencia abierta |
 | `POST` | `/tickets/:id/confirmar` | JWT | El usuario acepta la resolución y se cierra el issue |
-| `POST` | `/auth/verify-purchase` | JWT | Verificación de compra contra Google Play |
+| `POST` | `/auth/verify-purchase` | No | Verifica la compra y devuelve el JWT de sesión. El campo `plataforma` decide contra quién: `android` → Google Play, `windows` → Microsoft Store |
+| `POST` | `/auth/ms/ticket` | No | Acuña el ticket de Entra ID que WinRT necesita para pedir la Store ID key. Abierta por necesidad (aún no hay sesión), limitada por IP: `429 LIMITE_TICKETS_MS` al superar `MAX_TICKETS_MS_POR_HORA` (30/hora por defecto) |
+| `GET` | `/auth/me` | JWT | Estado de la sesión y de la licencia |
 | `POST` | `/webhooks/github` | Firma HMAC | Etiquetas, comentarios y cierre del issue |
 
 Las rutas de lectura y de mensaje **no exigen licencia activa**, a propósito: quien
@@ -145,9 +163,17 @@ ya abrió una incidencia puede seguir hablando de ella aunque su licencia caduqu
 
 ## Identidad del usuario
 
-No hay cuentas ni contraseñas. El `user_id` son los 16 primeros bytes del
-`SHA-256("usuario:" + purchase_token)`, así que un borrado de datos o un móvil
-nuevo no pierden el historial: Google Play restaura el token y sale el mismo id.
+No hay cuentas ni contraseñas. En **Android** el `user_id` son los 16 primeros
+bytes del `SHA-256("usuario:" + purchase_token)`, así que un borrado de datos o
+un móvil nuevo no pierden el historial: Google Play restaura el token y sale el
+mismo id.
+
+En **Windows** no existe un token de compra equivalente: lo que viaja en
+`purchase_token` es la *Store ID key*, que caduca a los 30 días y por tanto no
+puede anclar una identidad. El id se deriva del `order_id` que devuelve la
+Collection API de Microsoft —`hashUserIdWindows(licencia.order_id)`—, que sí es
+estable para la misma compra. El mecanismo de id de instalación descrito abajo
+funciona igual en las dos plataformas.
 
 El `purchase_token` sí cambia en una **recompra** (la suscripción caduca y se
 vuelve a contratar, o se cambia de plan). Para no dejar huérfano el historial,
@@ -193,7 +219,9 @@ usuarios sin correo compartían la clave `email:` y el último se la llevaba.
 - Rate limiting por usuario (por defecto: 5 tickets/día, configurable).
 - Todo el contenido generado por IA se sanitiza antes de publicarse como issue.
 - Las propuestas de fix de la IA nunca se aplican automáticamente — quedan como comentario/draft PR pendiente de revisión manual.
-- Verificación de compra siempre server-side contra Google Play Developer API.
+- Verificación de compra siempre server-side: Google Play Developer API en
+  Android, Microsoft Store Collection API en Windows. El cliente nunca decide si
+  su licencia es válida.
 
 ## Cómo funciona una incidencia
 
