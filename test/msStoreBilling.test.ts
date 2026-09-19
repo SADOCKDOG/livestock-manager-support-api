@@ -77,10 +77,10 @@ test('estado desconocido: deniega, no se presume', () => {
   assert.equal(r.activa, false);
 });
 
-// `PUR-UserAlreadyOwnsContent` es el estado que devuelve la Store cuando la
-// cuenta ya posee el complemento. Se vio en produccion el 2026-09-16: la app
-// respondia "No hay ninguna licencia de soporte en esta cuenta" a quien la
-// tenia. Acredita la compra, pero sin relajar el resto de comprobaciones.
+// `PUR-UserAlreadyOwnsContent` no es un estado documentado de la coleccion (los
+// validos son Active, Expired, Revoked y Banned): es el mensaje que la Store da
+// al comprador que ya posee el complemento. Se acepta como tolerancia, pero sin
+// relajar el resto de comprobaciones.
 
 test('ya poseida (PUR-UserAlreadyOwnsContent): concede licencia', () => {
   const r = interpretarColeccion([elemento({ status: 'PUR-UserAlreadyOwnsContent' })], AHORA);

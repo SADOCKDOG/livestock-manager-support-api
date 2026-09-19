@@ -108,10 +108,11 @@ export function licenciaVivaSegunAlmacen(
 /**
  * Estados que acreditan que la compra sigue en pie.
  *
- * `PUR-UserAlreadyOwnsContent` es el que devuelve la Store cuando el comprador
- * ya posee el complemento; no aparece en la documentacion publica. Se vio en
- * produccion el 2026-09-16: sin aceptarlo, una compra real se clasificaba como
- * «La suscripcion no esta activa» y se denegaba la licencia a quien la tenia.
+ * `Active` es el unico que «Query for products» da por vigente. Se acepta ademas
+ * `PUR-UserAlreadyOwnsContent`, que no es un estado de la coleccion sino el
+ * mensaje que la Store muestra al comprador que ya posee el complemento: es
+ * tolerancia por si asoma en la respuesta, no una via alternativa de licencia.
+ * Aceptarlo no relaja el resto de comprobaciones: sin endDate futura se deniega.
  */
 function acreditaCompra(status: string | undefined): boolean {
   return status === 'Active' || status === 'PUR-UserAlreadyOwnsContent';
