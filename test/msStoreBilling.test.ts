@@ -77,6 +77,50 @@ test('estado desconocido: deniega, no se presume', () => {
   assert.equal(r.activa, false);
 });
 
+// `PUR-UserAlreadyOwnsContent` es el estado que devuelve la Store cuando la
+// cuenta ya posee el complemento. Se vio en produccion el 2026-09-16: la app
+// respondia "No hay ninguna licencia de soporte en esta cuenta" a quien la
+// tenia. Acredita la compra, pero sin relajar el resto de comprobaciones.
+
+test('ya poseida (PUR-UserAlreadyOwnsContent): concede licencia', () => {
+  const r = interpretarColeccion([elemento({ status: 'PUR-UserAlreadyOwnsContent' })], AHORA);
+  assert.equal(r.activa, true);
+  assert.equal(r.order_id, 'a1b2c3d4-0000-1111-2222-333344445555');
+  assert.equal(r.instalacion_declarada, INSTALACION);
+});
+
+test('ya poseida pero caducada: deniega', () => {
+  const r = interpretarColeccion(
+    [elemento({ status: 'PUR-UserAlreadyOwnsContent', endDate: '2026-08-01T00:00:00.000Z' })],
+    AHORA,
+  );
+  assert.equal(r.activa, false);
+});
+
+test('ya poseida pero sin endDate: no se presume perpetua', () => {
+  const r = interpretarColeccion(
+    [elemento({ status: 'PUR-UserAlreadyOwnsContent', endDate: undefined })],
+    AHORA,
+  );
+  assert.equal(r.activa, false);
+});
+
+test('ya poseida convive con una activa: gana la que caduca mas tarde', () => {
+  const r = interpretarColeccion(
+    [
+      elemento({
+        status: 'PUR-UserAlreadyOwnsContent',
+        endDate: '2026-10-01T00:00:00.000Z',
+        orderId: 'poseida',
+      }),
+      elemento({ status: 'Active', endDate: '2027-09-01T00:00:00.000Z', orderId: 'activa' }),
+    ],
+    AHORA,
+  );
+  assert.equal(r.activa, true);
+  assert.equal(r.order_id, 'activa');
+});
+
 test('sin endDate: se toma como no vigente, no como perpetua', () => {
   const r = interpretarColeccion([elemento({ endDate: undefined })], AHORA);
   assert.equal(r.activa, false);

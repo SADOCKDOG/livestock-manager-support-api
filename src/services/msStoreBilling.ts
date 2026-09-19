@@ -105,6 +105,18 @@ export function licenciaVivaSegunAlmacen(
   return { activa: expira > ahora };
 }
 
+/**
+ * Estados que acreditan que la compra sigue en pie.
+ *
+ * `PUR-UserAlreadyOwnsContent` es el que devuelve la Store cuando el comprador
+ * ya posee el complemento; no aparece en la documentacion publica. Se vio en
+ * produccion el 2026-09-16: sin aceptarlo, una compra real se clasificaba como
+ * «La suscripcion no esta activa» y se denegaba la licencia a quien la tenia.
+ */
+function acreditaCompra(status: string | undefined): boolean {
+  return status === 'Active' || status === 'PUR-UserAlreadyOwnsContent';
+}
+
 export function interpretarColeccion(
   items: ElementoColeccion[],
   ahoraMs: number = Date.now(),
@@ -125,7 +137,7 @@ export function interpretarColeccion(
   // delante. Ordenar solo por fecha le denegaria la licencia a quien acaba de
   // pagar, asi que lo activo se examina primero; el resto solo sirve para
   // explicar el motivo y conservar el ancla de identidad.
-  const item = ordenados.find((i) => i.status === 'Active') ?? ordenados[0];
+  const item = ordenados.find((i) => acreditaCompra(i.status)) ?? ordenados[0];
   // Inalcanzable: nuestros.length > 0 garantiza ordenados[0], pero
   // noUncheckedIndexedAccess no lo sabe. Se mantiene la guarda por
   // coherencia con "sin verificacion no hay licencia".
@@ -148,9 +160,10 @@ export function interpretarColeccion(
     // Equivale a un reembolso en Google: hubo compra, pero ya no vale.
     return { ...base, motivo: 'La compra fue revocada o reembolsada' };
   }
-  if (item.status !== 'Active') {
-    // Incluye 'Expired' y cualquier estado que Microsoft anada despues. No se
-    // presume nada: sin verificacion positiva no hay licencia.
+  if (!acreditaCompra(item.status)) {
+    // Incluye 'Expired' y cualquier estado que Microsoft anada despues sin
+    // acreditar la compra. No se presume nada: sin verificacion positiva no hay
+    // licencia.
     return { ...base, motivo: 'La suscripcion no esta activa' };
   }
   if (!Number.isFinite(finMs)) {
