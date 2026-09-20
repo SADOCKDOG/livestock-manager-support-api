@@ -39,6 +39,7 @@ export const AUDIENCIA_CLAVE_COLECCIONES =
 export interface ElementoColeccion {
   inAppOfferToken?: string;
   productId?: string;
+  productType?: string;
   orderId?: string;
   transactionId?: string;
   status?: string;
@@ -241,6 +242,90 @@ export async function tokenDeAcceso(
 }
 
 /**
+ * DIAGNOSTICO TEMPORAL. Consulta de solo lectura con los cuatro productTypes
+ * validos, aparte de la consulta real para no alterarla: si la API rechazara
+ * alguno de los tipos, el fallo se queda aqui y no tumba la verificacion.
+ *
+ * Separa dos causas que hoy dan el mismo resultado vacio: que el comprador no
+ * tenga nada en su coleccion (identidad no resuelta) o que tenga cosas y sea el
+ * complemento el que no asienta. Solo se registran identificadores publicos del
+ * producto, ninguno del comprador.
+ */
+async function diagnosticarTiposColeccion(token: string, storeIdKey: string): Promise<string> {
+  const respuesta = await fetch(URL_COLECCIONES, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      maxPageSize: 100,
+      beneficiaries: [
+        { identityType: 'b2b', identityValue: storeIdKey, localTicketReference: REFERENCIA },
+      ],
+      productTypes: ['Application', 'Durable', 'Game', 'UnmanagedConsumable'],
+      validityType: 'All',
+    }),
+  });
+  if (!respuesta.ok) return `HTTP ${respuesta.status}`;
+  const datos = (await respuesta.json()) as RespuestaColecciones;
+  const items = datos.items ?? [];
+  return JSON.stringify({
+    total: items.length,
+    hayMasPaginas: Boolean(datos.continuationToken),
+    items: items.map((i) => ({
+      productId: i.productId,
+      inAppOfferToken: i.inAppOfferToken,
+      productType: i.productType,
+      status: i.status,
+    })),
+  });
+}
+
+/** Endpoint de la API de compras para las suscripciones de un comprador. */
+const URL_SUSCRIPCIONES = 'https://purchase.mp.microsoft.com/v8.0/b2b/recurrences/query';
+
+/** Una suscripcion tal y como la devuelve recurrences/query. */
+interface SuscripcionB2B {
+  productId?: string;
+  skuId?: string;
+  recurrenceState?: string;
+  expirationTime?: string;
+  isTrial?: boolean;
+}
+
+/**
+ * DIAGNOSTICO TEMPORAL. Consulta las suscripciones del comprador en la API de
+ * compras, aparte de la coleccion.
+ *
+ * `support_unlock` es una suscripcion, y Microsoft tiene para ellas una API
+ * propia: si la coleccion no devuelve nada, aqui se ve el estado real de la
+ * recurrencia. Usa la misma audiencia de servicio que la consulta de la
+ * coleccion, asi que no necesita ningun token nuevo. Solo se registran
+ * identificadores publicos del producto, ninguno del comprador.
+ */
+async function diagnosticarSuscripciones(token: string, storeIdKey: string): Promise<string> {
+  const respuesta = await fetch(URL_SUSCRIPCIONES, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ b2bKey: storeIdKey }),
+  });
+  if (!respuesta.ok) {
+    const texto = (await respuesta.text().catch(() => '')).slice(0, 1200);
+    return `HTTP ${respuesta.status}: ${texto}`;
+  }
+  const datos = (await respuesta.json()) as { items?: SuscripcionB2B[] };
+  const items = datos.items ?? [];
+  return JSON.stringify({
+    total: items.length,
+    items: items.map((i) => ({
+      productId: i.productId,
+      skuId: i.skuId,
+      estado: i.recurrenceState,
+      expira: i.expirationTime,
+      prueba: i.isTrial,
+    })),
+  });
+}
+
+/**
  * Consulta la coleccion del comprador identificado por la Store ID key.
  * Lanza si Microsoft no responde: quien llama debe tratarlo como «no se sabe»,
  * nunca como «no tiene licencia».
@@ -252,6 +337,19 @@ export async function verificarLicenciaWindows(
   storeIdKey: string,
 ): Promise<LicenciaWindows> {
   const token = await tokenDeAcceso(tenantId, clientId, clientSecret);
+  try {
+    console.log('[ms] diagnostico tipos:', await diagnosticarTiposColeccion(token, storeIdKey));
+  } catch (e) {
+    console.log('[ms] diagnostico tipos: fallo', String(e));
+  }
+  try {
+    console.log(
+      '[ms] diagnostico suscripciones:',
+      await diagnosticarSuscripciones(token, storeIdKey),
+    );
+  } catch (e) {
+    console.log('[ms] diagnostico suscripciones: fallo', String(e));
+  }
   const acumulados: ElementoColeccion[] = [];
   let continuacion: string | undefined;
   // La respuesta viene paginada. La primera pagina bastaria casi siempre, pero
@@ -290,6 +388,21 @@ export async function verificarLicenciaWindows(
     const datos = (await respuesta.json()) as RespuestaColecciones;
     acumulados.push(...(datos.items ?? []));
     if (!datos.continuationToken) {
+      // Diagnostico: sin esto, una coleccion vacia y una que trae el complemento
+      // con otro inAppOfferToken son indistinguibles desde fuera (las dos acaban
+      // en "No hay ninguna compra del soporte"). Se registran solo identificadores
+      // publicos del producto: ni orderId ni purchaser salen al log.
+      console.log(
+        `[ms] coleccion: ${acumulados.length} elemento(s)`,
+        JSON.stringify(
+          acumulados.map((i) => ({
+            productId: i.productId,
+            inAppOfferToken: i.inAppOfferToken,
+            productType: i.productType,
+            status: i.status,
+          })),
+        ),
+      );
       return interpretarColeccion(acumulados);
     }
     continuacion = datos.continuationToken;
