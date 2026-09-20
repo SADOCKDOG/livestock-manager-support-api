@@ -9,6 +9,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
   interpretarColeccion,
+  interpretarSuscripcion,
   licenciaVivaSegunAlmacen,
 } from '../src/services/msStoreBilling.ts';
 
@@ -219,4 +220,104 @@ test('sin usuario o con la licencia apagada no hay nada que frenar', () => {
     ).activa,
     false,
   );
+});
+
+// --- Via de las suscripciones (API de compras, recurrences/query) ------------
+//
+// `support_unlock` es una suscripcion y no aparece en la coleccion, asi que su
+// licencia se lee de la API de compras. `productId` ahi es el **Store ID** del
+// complemento, no el InAppOfferToken, y el estado `Active` es el unico que
+// acredita el derecho.
+
+const ID_SUSCRIPCION =
+  'mdr:0:bc0cb6960acd4515a0e1d638192d77b7:77d5ebee-0310-4d23-b204-83e8613baaac';
+
+function suscripcion(extra: Record<string, unknown> = {}) {
+  return {
+    id: ID_SUSCRIPCION,
+    productId: '9P4577W3B0D2',
+    skuId: '0010',
+    autoRenew: true,
+    recurrenceState: 'Active',
+    expirationTime: '2027-09-01T00:00:00.000Z',
+    ...extra,
+  };
+}
+
+test('suscripcion activa y vigente: concede licencia', () => {
+  const r = interpretarSuscripcion([suscripcion()], INSTALACION, AHORA);
+  assert.equal(r.activa, true);
+  assert.equal(r.expira, '2027-09-01T00:00:00.000Z');
+  assert.equal(r.order_id, ID_SUSCRIPCION);
+  assert.equal(r.instalacion_declarada, INSTALACION);
+  assert.equal(r.renovacion_automatica, true);
+});
+
+test('suscripcion de otro producto: deniega', () => {
+  const r = interpretarSuscripcion(
+    [suscripcion({ productId: '9NBLGGH4XXXX' })],
+    INSTALACION,
+    AHORA,
+  );
+  assert.equal(r.activa, false);
+  assert.equal(r.motivo, 'No hay ninguna suscripcion del soporte');
+});
+
+test('sin suscripciones: deniega', () => {
+  const r = interpretarSuscripcion([], INSTALACION, AHORA);
+  assert.equal(r.activa, false);
+});
+
+test('estados que no acreditan: deniega', () => {
+  for (const estado of ['Inactive', 'Canceled', 'Failed', 'InDunning', 'None']) {
+    const r = interpretarSuscripcion([suscripcion({ recurrenceState: estado })], INSTALACION, AHORA);
+    assert.equal(r.activa, false, `estado ${estado}`);
+  }
+});
+
+test('activa pero caducada: deniega y conserva el ancla', () => {
+  const r = interpretarSuscripcion(
+    [suscripcion({ expirationTime: '2026-08-01T00:00:00.000Z' })],
+    INSTALACION,
+    AHORA,
+  );
+  assert.equal(r.activa, false);
+  assert.equal(r.motivo, 'La suscripcion ha caducado');
+  assert.equal(r.order_id, ID_SUSCRIPCION);
+});
+
+test('activa sin fecha de caducidad: no se presume perpetua', () => {
+  const r = interpretarSuscripcion([suscripcion({ expirationTime: undefined })], INSTALACION, AHORA);
+  assert.equal(r.activa, false);
+  assert.equal(r.motivo, 'La suscripcion no tiene fecha de caducidad');
+});
+
+test('varias activas: gana la que caduca mas tarde', () => {
+  const r = interpretarSuscripcion(
+    [
+      suscripcion({ id: 'vieja', expirationTime: '2026-10-01T00:00:00.000Z' }),
+      suscripcion({ id: 'nueva', expirationTime: '2026-12-01T00:00:00.000Z' }),
+    ],
+    INSTALACION,
+    AHORA,
+  );
+  assert.equal(r.activa, true);
+  assert.equal(r.order_id, 'nueva');
+});
+
+test('una cancelada que caduca mas tarde no tapa a la activa', () => {
+  const r = interpretarSuscripcion(
+    [
+      suscripcion({
+        id: 'cancelada',
+        recurrenceState: 'Canceled',
+        expirationTime: '2027-12-01T00:00:00.000Z',
+      }),
+      suscripcion({ id: 'activa', expirationTime: '2026-12-01T00:00:00.000Z' }),
+    ],
+    INSTALACION,
+    AHORA,
+  );
+  assert.equal(r.activa, true);
+  assert.equal(r.order_id, 'activa');
 });

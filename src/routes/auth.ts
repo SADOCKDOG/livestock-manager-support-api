@@ -12,10 +12,12 @@
  */
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { SignJWT } from 'jose';
 import { verificarLicenciaAndroid } from '../services/playBilling';
 import {
   AUDIENCIA_CLAVE_COLECCIONES,
+  AUDIENCIA_CLAVE_COMPRAS,
   licenciaVivaSegunAlmacen,
   tokenDeAcceso as tokenEntraID,
   verificarLicenciaWindows,
@@ -241,54 +243,73 @@ rutas.post('/verify-purchase', async (c) => {
  * Windows de quien llama, y esa clave hay que traerla luego a
  * /auth/verify-purchase para que sirva de algo.
  */
-rutas.post('/ms/ticket', async (c) => {
-  if (!c.env.MS_ENTRA_TENANT_ID || !c.env.MS_ENTRA_CLIENT_ID || !c.env.MS_ENTRA_CLIENT_SECRET) {
-    return c.json(
-      {
-        error: 'La compra en Microsoft Store todavia no esta disponible',
-        codigo: 'MS_STORE_NO_CONFIGURADO',
-      },
-      501,
-    );
-  }
-  // Limite por IP: la ruta es abierta por necesidad (WinRT necesita el ticket
-  // antes de que exista sesion), asi que no hay user_id con el que limitar.
-  // Cada ticket es una llamada a Entra ID, y agotar esa cuota deja sin comprar
-  // a todo el mundo. El tope es generoso a proposito: la app revalida en cada
-  // arranque y varias personas pueden compartir IP.
-  const ip = c.req.header('CF-Connecting-IP') ?? '';
-  const almacenIP = new Almacen(c.env.TICKETS_KV);
-  if (ip) {
-    const maximo = parseInt(c.env.MAX_TICKETS_MS_POR_HORA ?? '30', 10) || 30;
-    if ((await almacenIP.contarAcunadosDeLaHora(ip)) >= maximo) {
+/** Contexto de estas rutas, para no repetir el tipo en cada manejador. */
+type ContextoAuth = Context<{ Bindings: Env; Variables: Variables }>;
+
+/**
+ * Acuna un ticket de Entra ID con el que la app pedira su Store ID key.
+ *
+ * Hay dos audiencias y no son intercambiables: Microsoft firma la clave para el
+ * servicio de esa audiencia, y el servicio de compras valida el emisor y
+ * rechaza las claves de colecciones (IDX10205). De ahi que haya una ruta por
+ * audiencia: el complemento de soporte es una suscripcion y se consulta por el
+ * servicio de compras.
+ */
+function manejadorTicket(audiencia: string) {
+  return async (c: ContextoAuth) => {
+    if (!c.env.MS_ENTRA_TENANT_ID || !c.env.MS_ENTRA_CLIENT_ID || !c.env.MS_ENTRA_CLIENT_SECRET) {
       return c.json(
         {
-          error: 'Demasiados intentos. Prueba de nuevo dentro de un rato.',
-          codigo: 'LIMITE_TICKETS_MS',
+          error: 'La compra en Microsoft Store todavia no esta disponible',
+          codigo: 'MS_STORE_NO_CONFIGURADO',
         },
-        429,
+        501,
       );
     }
-  }
-
-  try {
-    // Audiencia de acunado, no la del servicio: este ticket viaja hasta la app.
-    const ticket = await tokenEntraID(
-      c.env.MS_ENTRA_TENANT_ID,
-      c.env.MS_ENTRA_CLIENT_ID,
-      c.env.MS_ENTRA_CLIENT_SECRET,
-      AUDIENCIA_CLAVE_COLECCIONES,
-    );
-    // Se cuenta despues de emitirlo: un fallo de Entra ID no debe gastar cupo.
+    // Limite por IP: la ruta es abierta por necesidad (WinRT necesita el ticket
+    // antes de que exista sesion), asi que no hay user_id con el que limitar.
+    // Cada ticket es una llamada a Entra ID, y agotar esa cuota deja sin comprar
+    // a todo el mundo. El tope es generoso a proposito: la app revalida en cada
+    // arranque y varias personas pueden compartir IP.
+    const ip = c.req.header('CF-Connecting-IP') ?? '';
+    const almacenIP = new Almacen(c.env.TICKETS_KV);
     if (ip) {
-      await almacenIP.incrementarAcunadosDeLaHora(ip);
+      const maximo = parseInt(c.env.MAX_TICKETS_MS_POR_HORA ?? '30', 10) || 30;
+      if ((await almacenIP.contarAcunadosDeLaHora(ip)) >= maximo) {
+        return c.json(
+          {
+            error: 'Demasiados intentos. Prueba de nuevo dentro de un rato.',
+            codigo: 'LIMITE_TICKETS_MS',
+          },
+          429,
+        );
+      }
     }
-    return c.json({ ticket });
-  } catch (e) {
-    console.error('[auth] fallo el ticket de Entra ID:', detalleError(e));
-    return c.json({ error: 'No se pudo contactar con Microsoft ahora mismo' }, 502);
-  }
-});
+
+    try {
+      // Audiencia de acunado, no la del servicio: este ticket viaja hasta la app.
+      const ticket = await tokenEntraID(
+        c.env.MS_ENTRA_TENANT_ID,
+        c.env.MS_ENTRA_CLIENT_ID,
+        c.env.MS_ENTRA_CLIENT_SECRET,
+        audiencia,
+      );
+      // Se cuenta despues de emitirlo: un fallo de Entra ID no debe gastar cupo.
+      if (ip) {
+        await almacenIP.incrementarAcunadosDeLaHora(ip);
+      }
+      return c.json({ ticket });
+    } catch (e) {
+      console.error('[auth] fallo el ticket de Entra ID:', detalleError(e));
+      return c.json({ error: 'No se pudo contactar con Microsoft ahora mismo' }, 502);
+    }
+  };
+}
+
+/** Ticket para la coleccion: complementos que no son suscripcion. */
+rutas.post('/ms/ticket', manejadorTicket(AUDIENCIA_CLAVE_COLECCIONES));
+/** Ticket para compras: las suscripciones se consultan por ese servicio. */
+rutas.post('/ms/ticket-compras', manejadorTicket(AUDIENCIA_CLAVE_COMPRAS));
 
 /** Estado actual de la licencia, para que la app decida que mostrar. */
 rutas.get('/me', requiereSesion, async (c) => {
