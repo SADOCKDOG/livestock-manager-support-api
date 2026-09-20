@@ -3,6 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Explicito aunque sea el valor por defecto de wrangler. Sin esta linea, anadir
+# un bloque de rutas haria que wrangler INFIRIERA workers_dev = false en el
+# siguiente despliegue, y el frontend de escritorio (y el de Android) hablan con
+# este Worker por esa URL. Es heredable, asi que [env.production] la recibe.
+workers_dev = true
+
 # Variables publicas. Los SECRETOS nunca van aqui: se cargan con
 # `wrangler secret put <NOMBRE> --env production`. Una var vacia del mismo
 # nombre pisaria al secreto (fue la causa del incidente del 2026-08-28).
