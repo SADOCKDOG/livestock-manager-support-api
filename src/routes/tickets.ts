@@ -12,7 +12,11 @@
  */
 
 import { Hono } from 'hono';
-import { estructurarReporte, redactarRespuestaInicial } from '../services/ai';
+import {
+  estructurarReporte,
+  redactarRespuestaInicial,
+  redactarRespuestaSeguimiento,
+} from '../services/ai';
 import {
   cambiarAperturaDelIssue,
   comentarIssue,
@@ -100,6 +104,64 @@ async function agenteResponde(
     await reemplazarEtiquetaDeEstado(env, numeroIssue, 'estado:enviada', 'estado:analizada');
   } catch (e) {
     console.warn('[tickets] el agente no pudo responder al issue', numeroIssue, detalleError(e));
+  }
+}
+
+/**
+ * Etiqueta correspondiente al estado de un ticket. Sirve para saber que
+ * etiqueta quitar al pasar el agente a otro estado.
+ */
+function etiquetaDeEstado(estado: EstadoTicket): string {
+  return `estado:${estado}`;
+}
+
+/**
+ * El agente contesta a un mensaje nuevo del usuario dentro de una incidencia
+ * abierta y, si la conversacion ya evidencia la resolucion, la propone poniendo
+ * `estado:resuelta`. Quien cierra de verdad es el usuario con el SI/NO de la
+ * app (`/confirmar` reabre si responde que sigue fallando).
+ *
+ * Reglas de prudencia:
+ *  - Solo propone el cierre si el ticket no lo esta atendiendo ya una persona
+ *    (estado `revision` o `curso`): ahi el agente responde pero no toca el
+ *    estado, para no pisar al equipo.
+ *  - Devuelve el hilo en KV, no lo lee de GitHub: menos llamadas y menos
+ *    superficie. La respuesta del usuario ya se guardo al confirmar, asi que
+ *    el hilo de devolver es la conversacion completa en KV.
+ *
+ * Corre en `waitUntil`, fuera de la respuesta HTTP. Nunca lanza; si falla el
+ * mensaje ya existe en el issue y el equipo lo vera igual que siempre.
+ */
+async function agenteSigue(
+  env: Env,
+  ticket: Ticket,
+): Promise<void> {
+  if (ticket.github_issue_number === null) return;
+  try {
+    const hilo = (ticket.respuestas ?? []).map((r) => ({
+      autor: r.autor,
+      texto: r.texto,
+    }));
+
+    const decision = await redactarRespuestaSeguimiento(env.AI, hilo);
+    if (!decision.texto) return;
+
+    await comentarIssue(env, ticket.github_issue_number, comentarioDelAgente(decision.texto));
+
+    // Lo que deja el cierre propuesto: el estado no lo mueve una persona ya.
+    const atendidoPorPersona = ticket.estado === 'revision' || ticket.estado === 'curso';
+    const estadoObjetivo = decision.resuelta && !atendidoPorPersona ? 'resuelta' : ticket.estado;
+
+    if (estadoObjetivo !== ticket.estado) {
+      await reemplazarEtiquetaDeEstado(
+        env,
+        ticket.github_issue_number,
+        etiquetaDeEstado(ticket.estado),
+        etiquetaDeEstado(estadoObjetivo),
+      );
+    }
+  } catch (e) {
+    console.warn('[tickets] el agente no pudo seguir al issue', ticket.github_issue_number, detalleError(e));
   }
 }
 
@@ -332,6 +394,12 @@ rutas.post('/:id/responder', requiereSesion, async (c) => {
   const respuesta = { fecha: new Date().toISOString(), texto, autor: 'usuario' as const };
   const actualizado = await almacen.anadirRespuesta(id, respuesta, { estado });
   await almacen.incrementarMensajesDelDia(usuario.user_id);
+
+  // El agente lee el hilo, contesta y, si la conversacion ya lo evidencia,
+  // propone el cierre. Va en segundo plano; la respuesta al movil no espera.
+  if (actualizado && actualizado.github_issue_number !== null && !actualizado.confirmada_at) {
+    c.executionCtx.waitUntil(agenteSigue(c.env, actualizado));
+  }
 
   return c.json({ respuesta, estado: actualizado?.estado ?? ticket.estado });
 });
