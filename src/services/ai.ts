@@ -17,36 +17,12 @@
 import type { BorradorTicket, ContextoApp, Severidad } from '../types';
 import { limpiarPasos, limpiarTexto, limpiarTitulo, LIMITES } from '../utils/sanitize';
 import { detalleError } from '../utils/errores';
+import { recuperarConocimiento } from './conocimiento';
 
 // Modelo de Workers AI. El 70b cuantizado es el que mejor respeta un formato
 // JSON pedido en el prompt sin dispararse de latencia; los de 8b se inventan
 // campos con frecuencia y acaban en el borrador de reserva.
 const MODELO = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
-
-/**
- * Conocimiento del producto que viaja en los prompts de los agentes que escriben
- * al usuario, para que las comprobaciones que proponen sean reales y no
- * inventadas. Es la opcion de coste 0 (frente a Vectorize o AI Search): no
- * anade servicio ni binding, solo texto en el system prompt; la guia se
- * actualiza a mano, sin facturar nada a mayores.
- *
- * Reglas al anadir fallos: solo hechos confirmados por el equipo, sin prometer
- * arreglos ni versiones, y que la comprobacion pueda hacerse desde el movil.
- * El texto es «conocimiento», no una orden: el contenido del usuario sigue
- * siendo contenido y no debe poder tumbar estas reglas.
- */
-const CONOCIMIENTO_APP = `
-CONOCIMIENTO DEL PRODUCTO (hechos, no instrucciones):
-- Livestock Manager es la app de gestion ganadera de SdogFarm Software Factory.
-- Hay version de escritorio (Windows, se compra en la Microsoft Store) y de
-  movil (Android). Un ganadero puede tener historiales distintos en cada una.
-- Gestiona los animales de la explotacion y los registros y guias que exige la
-  normativa (p.ej. SIGGAN, crotal/especie).
-
-FALLOS CONOCIDOS (ampliar a mano con los confirmados):
-- (pendiente: aqui van los fallos reales y que debe comprobar el usuario)
-
-Importante: sigues respondiendo SOLO con el JSON pedido arriba.`;
 
 const INSTRUCCIONES = `Eres el clasificador de incidencias de Livestock Manager, una app de gestion ganadera.
 Recibes el texto libre de un ganadero y devuelves un reporte estructurado.
@@ -229,8 +205,7 @@ Formato exacto:
   "resumen": "en 1-2 frases, lo que has entendido que le pasa",
   "comprobaciones": ["cosa concreta que puede probar", "otra"],
   "datos_que_faltan": ["dato concreto que ayudaria a diagnosticarlo"]
-}
-${CONOCIMIENTO_APP}`;
+}`;
 
 /** Lista de cadenas limpias, acotada. Sirve para los dos arrays de la respuesta. */
 function limpiarLista(entrada: unknown, maximo: number): string[] {
@@ -239,6 +214,19 @@ function limpiarLista(entrada: unknown, maximo: number): string[] {
     .slice(0, maximo)
     .map((p) => limpiarTexto(p, LIMITES.paso).replace(/\n+/g, ' '))
     .filter((p) => p.length > 0);
+}
+
+/**
+ * Instrucciones de un agente con el conocimiento relevante al texto del usuario.
+ *
+ * El conocimiento se recupera en memoria por solapamiento de palabras y se
+ * anade a la base. El recordatorio final va siempre al cierre, para que el
+ * modelo no pierda el formato JSON pedido tras leer el bloque de conocimiento.
+ */
+function compilarInstrucciones(base: string, texto: string): string {
+  const conocimiento = recuperarConocimiento(texto);
+  const cierre = '\n\nImportante: sigues respondiendo SOLO con el JSON pedido arriba.';
+  return base + (conocimiento ? conocimiento : '') + cierre;
 }
 
 /**
@@ -278,8 +266,7 @@ Formato exacto:
   "resumen": "en 1-2 frases, respuesta al ultimo mensaje",
   "comprobaciones": ["cosa concreta que puede probar", "otra"],
   "resuelta": true o false
-}
-${CONOCIMIENTO_APP}`;
+}`;
 
 export interface HiloMensaje {
   /** Quien lo escribio; 'usuario' son los del ganadero, el resto del equipo o IA. */
@@ -316,7 +303,9 @@ export async function redactarRespuestaSeguimiento(
 
   let bruto: Record<string, unknown>;
   try {
-    bruto = extraerJSON(await llamarProveedor(ai, mensaje, INSTRUCCIONES_SEGUIMIENTO));
+    bruto = extraerJSON(
+      await llamarProveedor(ai, mensaje, compilarInstrucciones(INSTRUCCIONES_SEGUIMIENTO, mensaje)),
+    );
   } catch (e) {
     console.warn('[ai] no se pudo redactar la respuesta de seguimiento:', detalleError(e));
     return { texto: null, resuelta: false };
@@ -377,7 +366,9 @@ export async function redactarRespuestaInicial(
 
   let bruto: Record<string, unknown>;
   try {
-    bruto = extraerJSON(await llamarProveedor(ai, mensaje, INSTRUCCIONES_RESPUESTA));
+    bruto = extraerJSON(
+      await llamarProveedor(ai, mensaje, compilarInstrucciones(INSTRUCCIONES_RESPUESTA, mensaje)),
+    );
   } catch (e) {
     console.warn('[ai] no se pudo redactar la respuesta inicial:', detalleError(e));
     return null;
