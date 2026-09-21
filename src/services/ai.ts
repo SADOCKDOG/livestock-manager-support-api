@@ -19,10 +19,13 @@ import { limpiarPasos, limpiarTexto, limpiarTitulo, LIMITES } from '../utils/san
 import { detalleError } from '../utils/errores';
 import { recuperarConocimiento } from './conocimiento';
 
-// Modelo de Workers AI. El 70b cuantizado es el que mejor respeta un formato
-// JSON pedido en el prompt sin dispararse de latencia; los de 8b se inventan
-// campos con frecuencia y acaban en el borrador de reserva.
-const MODELO = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+// Modelo de Workers AI. Nemotron 3 Super (MoE) es el que mejor sigue las
+// instrucciones y la base de conocimiento recuperada: con llama-3.3-70b la IA
+// devolvía consejos genéricos que ignoraban un hecho explícito del manual (los
+// historiales de Windows y Android son separados). Es modelo con "reasoning",
+// así que el JSON se extrae igual con extraerJSON() y la latencia es mayor.
+// Los de 8b se inventan campos con frecuencia y acaban en el borrador de reserva.
+const MODELO = '@cf/nvidia/nemotron-3-120b-a12b';
 
 const INSTRUCCIONES = `Eres el clasificador de incidencias de Livestock Manager, una app de gestion ganadera.
 Recibes el texto libre de un ganadero y devuelves un reporte estructurado.
