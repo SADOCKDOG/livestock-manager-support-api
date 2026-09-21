@@ -220,6 +220,24 @@ export class Almacen {
     return ticket;
   }
 
+  /**
+   * Cuantas veces el usuario ha respondido «sigue sin funcionar» reabriendo la
+   * incidencia desde `resuelta`. Vive en su propia clave a proposito: la toca
+   * solo `/responder`; el webhook guarda el ticket completo leyendo una copia
+   * que puede ser vieja y, si el contador estuviera dentro del ticket, lo
+   * devolveria atras. En clave aparte no corre ese riesgo.
+   */
+  async contarReabiertas(ticketId: string): Promise<number> {
+    const valor = await this.kv.get(`reabiertas:${ticketId}`, 'text');
+    return valor ? parseInt(valor, 10) || 0 : 0;
+  }
+
+  async incrementarReabiertas(ticketId: string): Promise<number> {
+    const siguiente = (await this.contarReabiertas(ticketId)) + 1;
+    await this.kv.put(`reabiertas:${ticketId}`, String(siguiente));
+    return siguiente;
+  }
+
   // --- Rate limiting --------------------------------------------------------
 
   /** Devuelve el numero de tickets creados hoy por el usuario (UTC). */

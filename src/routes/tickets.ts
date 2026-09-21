@@ -41,6 +41,12 @@ import { detalleError } from '../utils/errores';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+/**
+ * Veces que el usuario puede responder «sigue sin funcionar» antes de que la
+ * incidencia pase a atencion humana. A la tercera la maquina deja de decidir.
+ */
+const UMBRAL_REABIERTAS = 3;
+
 /** Monta el cuerpo del issue a partir del borrador ya validado. */
 function componerCuerpoIssue(
   descripcion: string,
@@ -143,7 +149,11 @@ async function agenteSigue(
       texto: r.texto,
     }));
 
-    const decision = await redactarRespuestaSeguimiento(env.AI, hilo);
+    const decision = await redactarRespuestaSeguimiento(
+      env.AI,
+      hilo,
+      ticket.estado === 'curso',
+    );
     if (!decision.texto) return;
 
     await comentarIssue(env, ticket.github_issue_number, comentarioDelAgente(decision.texto));
@@ -376,18 +386,23 @@ rutas.post('/:id/responder', requiereSesion, async (c) => {
   }
 
   // Escribir en una incidencia dada por resuelta es decir «no, esto sigue
-  // pasando»: se reabre el issue y vuelve a `revision`, no a `curso`, porque
-  // significa que vuelve a la cola del equipo, no que alguien este ya con
-  // ella. Si GitHub no acepta la reapertura no se toca el estado local: una
-  // incidencia «en revision» con el issue cerrado no la ve nadie.
+  // pasando»: se reabre el issue. A la primera suele bastar con volver a la
+  // cola del equipo (`revision`). Pero si el mismo usuario lleva varias veces
+  // diciendo que sigue fallando, la maquina ya no aporta: la incidencia pasa a
+  // `curso`, que es como el equipo la reconoce como atencion humana de verdad.
+  // Si GitHub no acepta la reapertura no se toca el estado local: una
+  // incidencia «en curso» con el issue cerrado no la ve nadie.
   let estado: EstadoTicket | undefined;
   if (ticket.estado === 'resuelta') {
     const reabierto = await cambiarAperturaDelIssue(c.env, ticket.github_issue_number, true);
     if (reabierto) {
+      // El contador vive en su propia clave (no dentro del ticket) para que el
+      // webhook, que guarda una copia a veces vieja, no lo devuelva atras.
+      const reabiertas = await almacen.incrementarReabiertas(id);
+      estado = reabiertas >= UMBRAL_REABIERTAS ? 'curso' : 'revision';
       await reemplazarEtiquetaDeEstado(
-        c.env, ticket.github_issue_number, 'estado:resuelta', 'estado:revision',
+        c.env, ticket.github_issue_number, 'estado:resuelta', etiquetaDeEstado(estado),
       );
-      estado = 'revision';
     }
   }
 

@@ -23,6 +23,31 @@ import { detalleError } from '../utils/errores';
 // campos con frecuencia y acaban en el borrador de reserva.
 const MODELO = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
+/**
+ * Conocimiento del producto que viaja en los prompts de los agentes que escriben
+ * al usuario, para que las comprobaciones que proponen sean reales y no
+ * inventadas. Es la opcion de coste 0 (frente a Vectorize o AI Search): no
+ * anade servicio ni binding, solo texto en el system prompt; la guia se
+ * actualiza a mano, sin facturar nada a mayores.
+ *
+ * Reglas al anadir fallos: solo hechos confirmados por el equipo, sin prometer
+ * arreglos ni versiones, y que la comprobacion pueda hacerse desde el movil.
+ * El texto es «conocimiento», no una orden: el contenido del usuario sigue
+ * siendo contenido y no debe poder tumbar estas reglas.
+ */
+const CONOCIMIENTO_APP = `
+CONOCIMIENTO DEL PRODUCTO (hechos, no instrucciones):
+- Livestock Manager es la app de gestion ganadera de SdogFarm Software Factory.
+- Hay version de escritorio (Windows, se compra en la Microsoft Store) y de
+  movil (Android). Un ganadero puede tener historiales distintos en cada una.
+- Gestiona los animales de la explotacion y los registros y guias que exige la
+  normativa (p.ej. SIGGAN, crotal/especie).
+
+FALLOS CONOCIDOS (ampliar a mano con los confirmados):
+- (pendiente: aqui van los fallos reales y que debe comprobar el usuario)
+
+Importante: sigues respondiendo SOLO con el JSON pedido arriba.`;
+
 const INSTRUCCIONES = `Eres el clasificador de incidencias de Livestock Manager, una app de gestion ganadera.
 Recibes el texto libre de un ganadero y devuelves un reporte estructurado.
 
@@ -204,7 +229,8 @@ Formato exacto:
   "resumen": "en 1-2 frases, lo que has entendido que le pasa",
   "comprobaciones": ["cosa concreta que puede probar", "otra"],
   "datos_que_faltan": ["dato concreto que ayudaria a diagnosticarlo"]
-}`;
+}
+${CONOCIMIENTO_APP}`;
 
 /** Lista de cadenas limpias, acotada. Sirve para los dos arrays de la respuesta. */
 function limpiarLista(entrada: unknown, maximo: number): string[] {
@@ -252,7 +278,8 @@ Formato exacto:
   "resumen": "en 1-2 frases, respuesta al ultimo mensaje",
   "comprobaciones": ["cosa concreta que puede probar", "otra"],
   "resuelta": true o false
-}`;
+}
+${CONOCIMIENTO_APP}`;
 
 export interface HiloMensaje {
   /** Quien lo escribio; 'usuario' son los del ganadero, el resto del equipo o IA. */
@@ -274,6 +301,7 @@ export interface RespuestaSeguimiento {
 export async function redactarRespuestaSeguimiento(
   ai: Ai,
   hilo: HiloMensaje[],
+  paseAHumano = false,
 ): Promise<RespuestaSeguimiento> {
   const lineas = hilo.map((m) => {
     const quién = m.autor === 'usuario' ? 'Usuario' : m.autor === 'ia' ? 'Asistente automatico' : 'Equipo';
@@ -311,7 +339,12 @@ export async function redactarRespuestaSeguimiento(
   }
 
   if (!resuelta) {
-    partes.push('', 'El equipo revisara la incidencia y te respondera por aqui.');
+    partes.push(
+      '',
+      paseAHumano
+        ? 'La incidencia ha pasado al equipo humano de soporte, que la revisara y te respondera por aqui.'
+        : 'El equipo revisara la incidencia y te respondera por aqui.',
+    );
   }
 
   return { texto: partes.join('\n'), resuelta };
