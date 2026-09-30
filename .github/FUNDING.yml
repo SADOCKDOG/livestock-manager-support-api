@@ -1,0 +1,10 @@
+# Configuración de patrocinio para GitHub Sponsors
+# GitHub mostrará el botón de patrocinador si este archivo existe.
+
+github: SADOCKDOG
+# patreon: tu_usuario_de_patreon
+# ko_fi: tu_usuario_de_ko_fi
+# open_collective: tu_nombre_en_open_collective
+custom:
+  - "https://github.com/sponsors/SADOCKDOG"
+  - "https://freebuff.com"
