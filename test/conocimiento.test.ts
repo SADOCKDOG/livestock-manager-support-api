@@ -21,7 +21,22 @@ test('un texto sobre estados de la incidencia conecta con como se lleva una', ()
   assert.ok(resultado.includes('Como se lleva una incidencia'), 'deberia traer ese fragmento');
 });
 
+test('un texto sobre versionado MSIX conecta con el fragmento de versionado', () => {
+  const resultado = recuperarConocimiento('no veo los cambios reflejados en el paquete MSIX de la Store');
+  assert.ok(resultado.includes('Versionado del paquete MSIX'), 'deberia traer el fragmento de versionado MSIX');
+});
+
+test('un texto sobre sync maestro-desktop devuelve el fragmento correspondiente', () => {
+  const resultado = recuperarConocimiento('el comando npm run sync no copia mis cambios al desktop');
+  assert.ok(resultado.includes('Relacion maestro <-> desktop'), 'deberia traer el fragmento de sync maestro-desktop');
+});
+
+test('un texto sobre testing conecta con el fragmento de validacion', () => {
+  const resultado = recuperarConocimiento('los tests de Playwright fallan por densidad de pantalla');
+  assert.ok(resultado.includes('Testing y validacion'), 'deberia traer el fragmento de testing y validacion');
+});
+
 test('un texto sin relacion no aporta conocimiento', () => {
-  const resultado = recuperarConocimiento('zzz qqq www rrr 123');
+  const resultado = recuperarConocimiento('xyz abc 123');
   assert.equal(resultado, '');
 });

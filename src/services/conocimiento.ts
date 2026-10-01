@@ -69,6 +69,40 @@ const SECCIONES: Seccion[] = [
       'Puede haber unos segundos de desfase entre lo que el equipo marca en GitHub y lo que el ' +
       'usuario ve en la app. Si acaba de cambiar el estado, a veces tarda en reflejarse.',
   },
+  {
+    clave: 'versionado_msix',
+    titulo: 'Versionado del paquete MSIX (escritorio)',
+    texto:
+      'El paquete MSIX usa version de 4 lugares que deben ir sincronizados: ' +
+      'frontend/js/app-version.js (version y versionCode), src-tauri/Cargo.toml (version), ' +
+      'src-tauri/Cargo.lock (version, se actualiza solo), src-tauri/tauri.conf.json (version). ' +
+      'Para subir al vuelo en Partner Center: NO usar el CLI de la Store (solo sirve para crear productos). ' +
+      'Se sube el .msix generado manualmente por el Portal de Partner Center. ' +
+      'Si Partner Center rechaza por "version ya existe con contenido distinto": ' +
+      '1) reenviar exactamente el mismo .msix que fallo, o 2) subir de version en los 4 lugares y volver a generar.',
+  },
+  {
+    clave: 'maestro_desktop_sync',
+    titulo: 'Relacion maestro <-> desktop y sincronizacion',
+    texto:
+      'NO hay monorepo: LIVESTOCK-MANAGER (maestro) y livestock-desktop son repos independientes. ' +
+      'El comando npm run sync copia cambios del maestro al desktop via rsync, ' +
+      'protegiendo ficheros en preservedList.txt (soporte-store.js, index.html, app-version.js, config Tauri). ' +
+      'Por eso soporte-store.js no existe en el maestro: es exclusivo del desktop y lo protege el sync. ' +
+      'El build:msix ejecuta sync primero y aborta si el maestro no esta en rama master o desktop-mvp. ' +
+      'Flujo: desarrollar en maestro -> PR a master -> merge -> en desktop hacer sync -> build:msix -> subir a Partner Center Portal.',
+  },
+  {
+    clave: 'testing_validacion',
+    titulo: 'Testing y validacion (Playwright, axe-core, Android)',
+    texto:
+      'Suite E2E con Playwright: npm run test:e2e. Cada test levanta su propio servidor local. ' +
+      'La fuente de verdad es la raiz del repo, no el directorio www/ (output de build). ' +
+      'Accesibilidad WCAG AA con axe-core: npm run test:axe. Los tokens de color estan en css/design-tokens.css. ' +
+      'Android: npm run dev en host, abrir http://10.0.2.2:8080 en el emulador. ' +
+      'Para depurar webview: adb forward tcp:9222 localabstract:webview_devtools_remote_ y luego chrome://inspect/#devices. ' +
+      'La demo NO usa SeedData al arrancar (estado inicial vacio); tests por coordenadas pueden fallar por densidad de pantalla.',
+  },
 ];
 
 /** Conjunto de palabras demasiado comunes para separar secciones. */
