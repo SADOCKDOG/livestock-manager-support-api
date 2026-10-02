@@ -17,21 +17,26 @@ export const LIMITES = {
   mensaje: 2000,
 } as const;
 
+function escaparHtml(entrada: string): string {
+  return entrada
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
- * Normaliza y sanitiza una cadena de texto antes de publicarla.
+ * Escapa HTML y neutraliza patrones de mención / referencia.
  *
- * Se evita depender de regex de "subcadenas" para URL/HTML de forma
- * incompleta, y se hace una validacion determinista y segura.
+ * La sanitizacion basada en regex para borrar etiquetas es frágil y CodeQL la
+ * marca como peligrosa. Para este caso lo correcto es escapar HTML y tratar el
+ * contenido como texto plano antes de publicarlo en GitHub.
  */
 export function limpiarTexto(entrada: unknown, maximo: number): string {
   if (typeof entrada !== 'string') return '';
 
-  let s = entrada
-    .replace(/<[^>]*>/gi, '')
-    .replace(/javascript\s*:/gi, 'javascript&#58;')
-    .replace(/data\s*:/gi, 'data&#58;')
-    .replace(/vbscript\s*:/gi, 'vbscript&#58;')
-    .replace(/<!--[\s\S]*?-->/g, '')
+  let s = escaparHtml(entrada)
     .replace(/(^|\s)@([a-zA-Z0-9-]+)/g, '$1@$2')
     .replace(/(^|\s)#(\d+)/g, '$1#$2')
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
