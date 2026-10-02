@@ -143,6 +143,12 @@ async function agenteSigue(
   ticket: Ticket,
 ): Promise<void> {
   if (ticket.github_issue_number === null) return;
+  console.info('[tickets] inicia seguimiento automatico', {
+    ticket_id: ticket.ticket_id,
+    issue: ticket.github_issue_number,
+    estado: ticket.estado,
+    respuestas: (ticket.respuestas ?? []).length,
+  });
   try {
     const hilo = (ticket.respuestas ?? []).map((r) => ({
       autor: r.autor,
@@ -154,9 +160,24 @@ async function agenteSigue(
       hilo,
       ticket.estado === 'curso',
     );
+    console.info('[tickets] seguimiento automatico decidido', {
+      ticket_id: ticket.ticket_id,
+      issue: ticket.github_issue_number,
+      tiene_texto: Boolean(decision.texto),
+      resuelta: decision.resuelta,
+    });
     if (!decision.texto) return;
 
-    await comentarIssue(env, ticket.github_issue_number, comentarioDelAgente(decision.texto));
+    const comentarioPublicado = await comentarIssue(
+      env,
+      ticket.github_issue_number,
+      comentarioDelAgente(decision.texto),
+    );
+    console.info('[tickets] respuesta automatica publicada', {
+      ticket_id: ticket.ticket_id,
+      issue: ticket.github_issue_number,
+      aceptado: comentarioPublicado,
+    });
 
     // Lo que deja el cierre propuesto: el estado no lo mueve una persona ya.
     const atendidoPorPersona = ticket.estado === 'revision' || ticket.estado === 'curso';
@@ -413,6 +434,11 @@ rutas.post('/:id/responder', requiereSesion, async (c) => {
   // El agente lee el hilo, contesta y, si la conversacion ya lo evidencia,
   // propone el cierre. Va en segundo plano; la respuesta al movil no espera.
   if (actualizado && actualizado.github_issue_number !== null && !actualizado.confirmada_at) {
+    console.info('[tickets] programa seguimiento automatico', {
+      ticket_id: actualizado.ticket_id,
+      issue: actualizado.github_issue_number,
+      respuestas: (actualizado.respuestas ?? []).length,
+    });
     c.executionCtx.waitUntil(agenteSigue(c.env, actualizado));
   }
 

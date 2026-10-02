@@ -14,10 +14,10 @@
  * Cambiar de proveedor solo deberia tocar `llamarProveedor()`.
  */
 
-import type { BorradorTicket, ContextoApp, Severidad } from '../types';
-import { limpiarPasos, limpiarTexto, limpiarTitulo, LIMITES } from '../utils/sanitize';
-import { detalleError } from '../utils/errores';
-import { recuperarConocimiento } from './conocimiento';
+import type { BorradorTicket, ContextoApp, Severidad } from '../types.ts';
+import { limpiarPasos, limpiarTexto, limpiarTitulo, LIMITES } from '../utils/sanitize.ts';
+import { detalleError } from '../utils/errores.ts';
+import { recuperarConocimiento } from './conocimiento.ts';
 
 // Modelo de Workers AI. Nemotron 3 Super (MoE) es el que mejor sigue las
 // instrucciones y la base de conocimiento recuperada: con llama-3.3-70b la IA
@@ -51,17 +51,26 @@ const SEVERIDADES: Severidad[] = ['alta', 'media', 'baja'];
 /**
  * Texto util de lo que devuelve Workers AI.
  *
- * Segun el modelo, `response` llega como cadena con el JSON dentro o como el
- * objeto ya parseado. Suponer solo lo primero costo un `TypeError: .trim is not
- * a function` que caia en el borrador de reserva sin decir por que. Se aceptan
- * las dos formas y, si llega una tercera, el error dice que forma tenia.
+ * Segun el modelo, `response` llega como cadena con el JSON dentro, como el
+ * objeto ya parseado o como una respuesta compatible con Chat Completions, cuyo
+ * texto vive en `choices[0].message.content`. Suponer solo una de esas formas
+ * hace que el agente caiga en el borrador de reserva sin decir por que. Se
+ * aceptan las tres y, si llega una cuarta, el error dice que forma tenia.
  */
 function textoDeRespuesta(datos: unknown): string {
   if (typeof datos === 'string') return datos;
 
-  const respuesta = (datos as { response?: unknown } | null)?.response;
+  const objeto = datos as {
+    response?: unknown;
+    choices?: Array<{ message?: { content?: unknown } }>;
+  } | null;
+
+  const respuesta = objeto?.response;
   if (typeof respuesta === 'string') return respuesta;
   if (respuesta && typeof respuesta === 'object') return JSON.stringify(respuesta);
+
+  const contenido = objeto?.choices?.[0]?.message?.content;
+  if (typeof contenido === 'string') return contenido;
 
   throw new Error(
     'Workers AI devolvio una forma inesperada: ' + JSON.stringify(datos).slice(0, 200)
@@ -78,11 +87,26 @@ async function llamarProveedor(
   ai: Ai,
   mensaje: string,
   instrucciones: string = INSTRUCCIONES,
+  operacion = 'generacion',
 ): Promise<string> {
   // `run` lanza si el modelo no existe o la cuenta agota su cuota diaria; el
   // catch de quien llama lo registra con detalle y decide como seguir.
+  console.info('[ai] inicia inferencia', {
+    operacion,
+    modelo: MODELO,
+    mensaje_chars: mensaje.length,
+    instrucciones_chars: instrucciones.length,
+    max_tokens: 2048,
+    thinking: false,
+  });
   const datos = await ai.run(MODELO, {
-    max_tokens: 1024,
+    // Nemotron puede dedicar tokens al razonamiento interno. Aqui necesitamos
+    // una salida corta y estructurada; si piensa con el limite anterior de
+    // 1024, a veces no llega a emitir el JSON que extraerJSON() necesita.
+    max_tokens: 2048,
+    chat_template_kwargs: {
+      enable_thinking: false,
+    },
     messages: [
       { role: 'system', content: instrucciones },
       { role: 'user', content: mensaje },
@@ -90,6 +114,12 @@ async function llamarProveedor(
   });
 
   const texto = textoDeRespuesta(datos).trim();
+  console.info('[ai] inferencia recibida', {
+    operacion,
+    respuesta_tipo: typeof datos,
+    respuesta_claves: datos && typeof datos === 'object' ? Object.keys(datos) : [],
+    texto_chars: texto.length,
+  });
   if (!texto) throw new Error('El proveedor de IA devolvio una respuesta vacia');
   return texto;
 }
@@ -135,7 +165,7 @@ export async function estructurarReporte(
 
   let bruto: Record<string, unknown>;
   try {
-    bruto = extraerJSON(await llamarProveedor(ai, mensaje));
+    bruto = extraerJSON(await llamarProveedor(ai, mensaje, INSTRUCCIONES, 'estructuracion'));
   } catch (e) {
     console.warn('[ai] fallo la estructuracion, se usa el borrador de reserva:', detalleError(e));
     return borradorDeReserva(ticketId, descripcionUsuario);
@@ -307,7 +337,12 @@ export async function redactarRespuestaSeguimiento(
   let bruto: Record<string, unknown>;
   try {
     bruto = extraerJSON(
-      await llamarProveedor(ai, mensaje, compilarInstrucciones(INSTRUCCIONES_SEGUIMIENTO, mensaje)),
+      await llamarProveedor(
+        ai,
+        mensaje,
+        compilarInstrucciones(INSTRUCCIONES_SEGUIMIENTO, mensaje),
+        'seguimiento',
+      ),
     );
   } catch (e) {
     console.warn('[ai] no se pudo redactar la respuesta de seguimiento:', detalleError(e));
@@ -370,7 +405,12 @@ export async function redactarRespuestaInicial(
   let bruto: Record<string, unknown>;
   try {
     bruto = extraerJSON(
-      await llamarProveedor(ai, mensaje, compilarInstrucciones(INSTRUCCIONES_RESPUESTA, mensaje)),
+      await llamarProveedor(
+        ai,
+        mensaje,
+        compilarInstrucciones(INSTRUCCIONES_RESPUESTA, mensaje),
+        'respuesta-inicial',
+      ),
     );
   } catch (e) {
     console.warn('[ai] no se pudo redactar la respuesta inicial:', detalleError(e));
