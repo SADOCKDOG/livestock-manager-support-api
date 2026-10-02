@@ -18,27 +18,26 @@ export const LIMITES = {
 } as const;
 
 /**
- * Neutraliza HTML y las construcciones de markdown que permiten ejecutar algo
- * o suplantar la interfaz de GitHub. No se escapa todo el markdown: se quiere
- * que el issue sea legible, no texto plano.
+ * Normaliza y sanitiza una cadena de texto antes de publicarla.
+ *
+ * Se evita depender de regex de "subcadenas" para URL/HTML de forma
+ * incompleta, y se hace una validacion determinista y segura.
  */
 export function limpiarTexto(entrada: unknown, maximo: number): string {
   if (typeof entrada !== 'string') return '';
-  let s = entrada;
 
-  // Etiquetas HTML completas (GitHub permite un subconjunto en markdown).
-  s = s.replace(/<[^>]*>/g, '');
-  // Enlaces con esquemas ejecutables.
-  s = s.replace(/(javascript|data|vbscript):/gi, '$1&#58;');
-  // Comentarios de markdown/HTML que ocultan contenido al lector.
-  s = s.replace(/<!--[\s\S]*?-->/g, '');
-  // Referencias que notifican a terceros o enlazan issues ajenos sin querer.
-  s = s.replace(/(^|\s)@([a-zA-Z0-9-]+)/g, '$1@​$2');
-  s = s.replace(/(^|\s)#(\d+)/g, '$1#​$2');
-  // Caracteres de control salvo salto de linea y tabulador.
-  s = s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
-  // Normalizar saltos y recortar espacio sobrante.
-  s = s.replace(/\r\n/g, '\n').replace(/\n{4,}/g, '\n\n\n').trim();
+  let s = entrada
+    .replace(/<[^>]*>/gi, '')
+    .replace(/javascript\s*:/gi, 'javascript&#58;')
+    .replace(/data\s*:/gi, 'data&#58;')
+    .replace(/vbscript\s*:/gi, 'vbscript&#58;')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/(^|\s)@([a-zA-Z0-9-]+)/g, '$1@$2')
+    .replace(/(^|\s)#(\d+)/g, '$1#$2')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
 
   if (s.length > maximo) s = s.slice(0, maximo) + '…';
   return s;
