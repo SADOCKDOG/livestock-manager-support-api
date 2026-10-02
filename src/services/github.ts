@@ -72,7 +72,7 @@ function aPEM(der: Uint8Array, etiqueta: string): string {
  * secreto si se pega en la consola de Cloudflare en vez de darlo por stdin.
  */
 function normalizarClave(clave: string): string {
-  const limpia = (clave.includes('\n') ? clave.replace(/\n/g, '\n') : clave).trim();
+  const limpia = clave.trim();
 
   if (limpia.startsWith('-----BEGIN PRIVATE KEY-----')) return limpia;
 
@@ -84,11 +84,10 @@ function normalizarClave(clave: string): string {
     return aPEM(pkcs1APkcs8(der), 'PRIVATE KEY');
   }
 
-  // Ni PKCS#8 ni PKCS#1. Se dice que cabecera trae, nunca el contenido.
   const corte = limpia.indexOf('\n');
   throw new Error(
     'GITHUB_APP_PRIVATE_KEY no parece una clave PEM. Empieza por: ' +
-      JSON.stringify(limpia.slice(0, corte === -1 ? 40 : corte))
+      JSON.stringify(limpia.slice(0, corte === -1 ? 40 : corte)),
   );
 }
 
@@ -98,7 +97,7 @@ async function jwtDeApp(env: Env): Promise<string> {
   const ahora = Math.floor(Date.now() / 1000);
   return new SignJWT({})
     .setProtectedHeader({ alg: 'RS256' })
-    .setIssuedAt(ahora - 60) // margen por desfase de reloj
+    .setIssuedAt(ahora - 60)
     .setExpirationTime(ahora + 9 * 60)
     .setIssuer(env.GITHUB_APP_ID)
     .sign(clave);
@@ -180,18 +179,6 @@ export async function crearIssue(env: Env, datos: DatosIssue): Promise<number> {
 
 /**
  * Cambia la etiqueta de estado del issue: quita la anterior y pone la nueva.
- *
- * Hay que quitar la vieja, no solo anadir: `estadoDesdePayload` recorre las
- * etiquetas y se queda con la primera que reconoce, y GitHub no garantiza el
- * orden del array. Con `estado:enviada` y `estado:analizada` a la vez, el
- * estado que ve el usuario dependeria del azar.
- *
- * Si la etiqueta nueva no existe en el repo, GitHub la crea al asignarla.
- *
- * Esto es lo mas parecido a «el agente se asigna la incidencia» que permite
- * GitHub: una GitHub App no puede figurar como `assignee`, ese campo solo
- * admite cuentas de persona. La etiqueta deja la misma marca visible en el
- * tablero del mantenedor.
  */
 export async function reemplazarEtiquetaDeEstado(
   env: Env,
@@ -201,7 +188,6 @@ export async function reemplazarEtiquetaDeEstado(
 ): Promise<void> {
   const base = `/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/issues/${numero}`;
 
-  // Un 404 aqui es lo normal si la etiqueta anterior ya no estaba puesta.
   await peticionGitHub(env, `${base}/labels/${encodeURIComponent(anterior)}`, {
     method: 'DELETE',
   }).catch(() => undefined);
@@ -216,14 +202,7 @@ export async function reemplazarEtiquetaDeEstado(
 }
 
 /**
- * Anade un comentario al issue. Se usa para la hipotesis tecnica de la IA, que
- * va separada del cuerpo para que se lea como lo que es: una sugerencia; para
- * la respuesta del agente, que si llega al usuario; y para los mensajes que el
- * usuario escribe desde la app.
- *
- * Devuelve si GitHub lo acepto. Casi todas las llamadas pueden ignorarlo (un
- * comentario perdido no invalida el ticket), pero el mensaje del usuario si
- * necesita saberlo: si no llega a GitHub, nadie del equipo lo va a leer.
+ * Anade un comentario al issue.
  */
 export async function comentarIssue(
   env: Env,
@@ -244,14 +223,6 @@ export async function comentarIssue(
 
 /**
  * Abre o cierra el issue.
- *
- * Lo usa la confirmacion de resolucion: `estado:resuelta` lo pone el equipo,
- * pero mientras la persona que reporto el fallo no diga que ya le funciona es
- * una propuesta, no un cierre. Al confirmar se cierra el issue de verdad; si
- * responde que sigue fallando se reabre y vuelve a `estado:curso`.
- *
- * Devuelve si GitHub lo acepto: quien reabre necesita saberlo, porque dejar la
- * incidencia en curso en KV con el issue cerrado la esconde del equipo.
  */
 export async function cambiarAperturaDelIssue(
   env: Env,
