@@ -2,13 +2,15 @@
 
 Backend de soporte con IA para Livestock Manager. Recibe incidencias desde la app, las estructura con IA, y crea issues en un repositorio de soporte dedicado vía GitHub App — sin exponer nunca credenciales al cliente.
 
-Repo independiente de `LIVESTOCK-MANAGER` y `livestock-pwa-msix`: no comparte historial git ni build. El ciclo de vida completo de una incidencia está más abajo, en «Cómo funciona una incidencia».
+Repo independiente de `LIVESTOCK-MANAGER` y `livestock-desktop`: no comparte historial git ni build. El ciclo de vida completo de una incidencia está más abajo, en «Cómo funciona una incidencia».
+
+> **Disponibilidad:** el soporte con IA es un complemento opcional de Livestock Manager, con suscripción mensual renovable; la app funciona completa sin él. Cada usuario tiene un máximo diario de incidencias y de mensajes (`MAX_TICKETS_PER_DAY` y `MAX_MENSAJES_PER_DAY`). Este backend lo consumen la versión de Android 4.10.8, en prueba cerrada y aún no disponible para usuario final, y la versión de Windows nativa 4.11.15.
 
 ## Stack
 
 - **Runtime**: Cloudflare Workers
 - **Almacenamiento**: Cloudflare KV (mapeo tickets) — migrar a D1 si se necesita consulta relacional más adelante
-- **IA**: Workers AI (`env.AI`), modelo `@cf/meta/llama-3.3-70b-instruct-fp8-fast` — sin API key propia ni proveedor externo
+- **IA**: Workers AI (`env.AI`), modelo `@cf/nvidia/nemotron-3-120b-a12b` (Nemotron 3 Super) — sin API key propia ni proveedor externo
 - **GitHub**: GitHub App (permisos `Issues: Read & Write` únicamente)
 - **Verificación de compra**: Google Play Developer API (Android) y Microsoft Store
   Collection API vía Entra ID (Windows)
@@ -83,7 +85,6 @@ wrangler secret put GITHUB_APP_ID
 wrangler secret put GITHUB_APP_PRIVATE_KEY
 wrangler secret put GITHUB_APP_INSTALLATION_ID
 wrangler secret put GITHUB_WEBHOOK_SECRET
-wrangler secret put AI_API_KEY
 wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
 wrangler secret put JWT_SECRET
 ```
@@ -312,7 +313,7 @@ código).
 
 ## Licencia
 
-Uso exclusivo interno — Livestock Manager.
+Todos los derechos reservados. La aplicación Livestock Manager puede usarse gratuitamente según las condiciones de la Microsoft Store; el código de este backend no se distribuye bajo licencia de código abierto.
 
 
 
