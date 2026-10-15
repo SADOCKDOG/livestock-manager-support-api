@@ -56,6 +56,40 @@ async function emitirSesion(
 }
 
 /**
+ * Cambia solo el correo de contacto de un usuario ya reconocido por su compra.
+ *
+ * Se usa cuando la licencia no esta viva, donde el camino normal nunca llega a
+ * `guardarUsuario`. Solo se toca `email`: ni `purchase_token` ni el estado de la
+ * licencia, que aqui no cambian. Lo que se pide es poder corregir la direccion
+ * de aviso, y con la suscripcion caducada el 403 de mas abajo lo impedia.
+ *
+ * `userId` lo decide quien llama y sale siempre de un valor verificado por la
+ * plataforma (el purchase_token de Google, el orderId de Microsoft), nunca de un
+ * dato que declare el cliente. Es deliberado: el id de instalacion si lo declara
+ * el cliente, y con el la rama `licencia-anterior-caducada` de
+ * `resolverIdentidad` devolveria la ficha de quien lo tenga enlazada, de modo
+ * que un token propio caducado mas el instalacion de otro bastaria para
+ * reescribirle el correo. Aqui no se consulta ese indice: si la ficha no esta,
+ * no se crea y no se escribe nada.
+ */
+async function actualizarCorreo(
+  almacen: Almacen,
+  userId: string,
+  email: string,
+): Promise<void> {
+  const base = await almacen.obtenerUsuario(userId);
+  if (!base) return;
+
+  await almacen.guardarUsuario({ ...base, email });
+  // El indice `email:` del correo anterior se queda apuntando a este usuario y
+  // haria que buscar por el viejo lo encontrara igual. Se retira para que el
+  // cambio sea real y no solo una etiqueta.
+  if (base.email && base.email !== email) {
+    await almacen.retirarIndiceEmail(base.email, userId);
+  }
+}
+
+/**
  * Valida la compra y devuelve la sesion.
  *
  * Se llama tras comprar y en cada arranque de la app: asi una licencia
@@ -119,6 +153,22 @@ rutas.post('/verify-purchase', async (c) => {
     }
 
     if (!licencia.activa || !licencia.order_id) {
+      // Igual que en Android, el correo se corrige tambien sin licencia viva,
+      // y aqui es el caso habitual: la suscripcion de Microsoft caduca y sigue
+      // siendo la licencia de quien esta usando el escritorio. El anclaje es el
+      // orderId, que firma Microsoft, no el id de instalacion que declara el
+      // cliente. Sin order_id no hay a quien atribuirlo, asi que no se escribe.
+      if (cuerpo?.actualizar_email && email && licencia.compra_reconocida && licencia.order_id) {
+        try {
+          await actualizarCorreo(
+            new Almacen(c.env.TICKETS_KV),
+            await hashUserIdWindows(licencia.order_id),
+            email,
+          );
+        } catch (e) {
+          console.error('[auth] no se pudo actualizar el correo (windows):', detalleError(e));
+        }
+      }
       return c.json(
         { error: licencia.motivo ?? 'La compra no es valida', codigo: 'COMPRA_NO_VALIDA' },
         403,
@@ -183,6 +233,25 @@ rutas.post('/verify-purchase', async (c) => {
   }
 
   if (!resultado.activa) {
+    // El correo se actualiza tambien sin licencia viva. Se guarda antes del
+    // corte y no emite sesion: lo que se pide al usuario es poder corregir la
+    // direccion de aviso, y con la suscripcion caducada el 403 de mas abajo le
+    // impidia hacerlo justo cuando mas lo necesita (correo que ya no existe).
+    // Solo con compra reconocida por Google: un token inventado da 404 y no
+    // llega aqui, asi que no se abre una via para escribir en cualquier ficha.
+    if (cuerpo?.actualizar_email && email && resultado.compra_reconocida) {
+      try {
+        await actualizarCorreo(
+          new Almacen(c.env.TICKETS_KV),
+          await hashUserId(purchaseToken),
+          email,
+        );
+      } catch (e) {
+        // Si el correo no se puede guardar, la licencia sigue sin estar bien:
+        // se sigue por el corte de abajo y no se informa de un fallo parcial.
+        console.error('[auth] no se pudo actualizar el correo:', detalleError(e));
+      }
+    }
     return c.json(
       { error: resultado.motivo ?? 'La compra no es valida', codigo: 'COMPRA_NO_VALIDA' },
       403,

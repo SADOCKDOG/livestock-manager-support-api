@@ -52,6 +52,21 @@ export class Almacen {
   }
 
   /**
+   * Retira el indice `email:` de un correo que ya no es el del usuario.
+   *
+   * Sin esto, cambiar el correo dejaba el indice viejo apuntando al mismo
+   * user_id: buscar por la direccion anterior lo seguiria encontrando, que es
+   * justo lo contrario de lo que quiere quien la ha cambiado.
+   */
+  async retirarIndiceEmail(email: string, userId: string): Promise<void> {
+    const clave = `email:${email.toLowerCase()}`;
+    // Solo se borra si de verdad apunta a este usuario: si otro se ha
+    // registrado despues con ese correo, su indice no se toca.
+    const actual = await this.kv.get(clave, 'text');
+    if (actual === userId) await this.kv.delete(clave);
+  }
+
+  /**
    * user_id al que quedo vinculada una instalacion de la app. Es lo que permite
    * reconocer al mismo ganadero cuando Google le da un purchase_token nuevo.
    */

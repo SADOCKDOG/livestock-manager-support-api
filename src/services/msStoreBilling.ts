@@ -54,6 +54,7 @@ function vacia(motivo: string): LicenciaWindows {
     es_suscripcion: true,
     renovacion_automatica: null,
     token_anterior: null,
+    compra_reconocida: false,
     order_id: null,
     instalacion_declarada: null,
   };
@@ -98,6 +99,11 @@ export function interpretarColeccion(
     es_suscripcion: true,
     renovacion_automatica: null,
     token_anterior: null,
+    // A diferencia de `vacia()`, aqui hay una compra detras: `item` viene de la
+    // coleccion del comprador con su orderId. Puede estar caducada o revocada y
+    // no dar acceso, pero el titular es alguien que compro de verdad, que es lo
+    // que autoriza a corregir su correo sin licencia viva.
+    compra_reconocida: true,
     order_id: item.orderId ?? null,
     instalacion_declarada: item.purchaser?.identityValue ?? null,
   };
@@ -230,6 +236,11 @@ export function interpretarSuscripcion(
     es_suscripcion: true,
     renovacion_automatica: null,
     token_anterior: null,
+    // Igual que en el camino de collection: hay una suscripcion real y firmada
+    // por Microsoft. Caducada no significa desconocida.
+    compra_reconocida: true,
+    // El id de la suscripcion es el ancla de identidad: lo firma Microsoft y no
+    // cambia en toda la vida de la suscripcion (una recompra crea uno nuevo).
     order_id: item?.id ?? null,
     instalacion_declarada: instalacionDeclarada || null,
   };
