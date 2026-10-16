@@ -90,6 +90,42 @@ async function actualizarCorreo(
 }
 
 /**
+ * Guarda la ficha del usuario y retira el indice `email:` del correo anterior.
+ *
+ * `guardarUsuario` escribe el indice del correo NUEVO pero no sabe cual era el
+ * viejo, asi que sola dejaba los dos indices apuntando al mismo user_id. Eso se
+ * vio en produccion el 2026-10-16: tras cambiar el correo en Ajustes con la
+ * licencia viva, el indice del correo antiguo seguia alli y buscar por el
+ * encontraba al mismo usuario.
+ *
+ * Solo se retira cuando el usuario ha editado el campo a proposito
+ * (`actualizar_email`): en los arranques normales el correo va vacio y sin esta
+ * marca se borraria el indice de quien si lo tiene puesto.
+ *
+ * No reutiliza `actualizarCorreo` a proposito: aquella lee la ficha ya guardada
+ * y solo le cambia el correo, con lo que al llamarla aqui se perderian el
+ * `purchase_token` y el `licencia_expira` que acaban de verificar la Store.
+ */
+async function guardarUsuarioYRetirarCorreoAnterior(
+  almacen: Almacen,
+  usuario: Usuario,
+  actualizandoEmail: boolean,
+): Promise<void> {
+  if (!actualizandoEmail) {
+    await almacen.guardarUsuario(usuario);
+    return;
+  }
+
+  const base = await almacen.obtenerUsuario(usuario.user_id);
+  await almacen.guardarUsuario(usuario);
+  // Solo si la ficha ya existia con otro correo: en una ficha nueva no hay
+  // indice viejo que retirar, y `base.email` vacio no es un indice.
+  if (base?.email && base.email !== usuario.email) {
+    await almacen.retirarIndiceEmail(base.email, usuario.user_id);
+  }
+}
+
+/**
  * Valida la compra y devuelve la sesion.
  *
  * Se llama tras comprar y en cada arranque de la app: asi una licencia
@@ -211,7 +247,11 @@ rutas.post('/verify-purchase', async (c) => {
       licencia_soporte_activa: true,
       licencia_expira: licencia.expira,
     };
-    await almacen.guardarUsuario(usuarioWin);
+    await guardarUsuarioYRetirarCorreoAnterior(
+      almacen,
+      usuarioWin,
+      cuerpo?.actualizar_email === true,
+    );
     if (instalacionWin && vincularInstalacion) {
       await almacen.vincularInstalacion(instalacionWin, userId);
     }
@@ -290,7 +330,7 @@ rutas.post('/verify-purchase', async (c) => {
     licencia_soporte_activa: true,
     licencia_expira: resultado.expira,
   };
-  await almacen.guardarUsuario(usuario);
+  await guardarUsuarioYRetirarCorreoAnterior(almacen, usuario, cuerpo?.actualizar_email === true);
   // Solo cuando le corresponde a este usuario: ver services/identidad.ts.
   if (instalacion && vincularInstalacion) {
     await almacen.vincularInstalacion(instalacion, userId);
