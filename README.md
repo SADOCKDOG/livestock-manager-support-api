@@ -210,6 +210,51 @@ El `email` es opcional y solo sirve de último recurso manual. Se indexa como
 `email:<correo> → user_id` **solo si existe**; sin ese guardia todos los
 usuarios sin correo compartían la clave `email:` y el último se la llevaba.
 
+**El correo no concede licencia ni decide el historial.** Solo es un índice
+inverso para encontrar al usuario. La licencia se ancla al `order_id`, de modo que
+un correo equivocado o ficticio no la invalida; comprobado en producción el
+2026-10-16.
+
+### Qué datos maneja una compra en Microsoft Store
+
+De la vista a la licencia en funcionamiento, en cuatro saltos. Cada uno lleva
+un identificador distinto y conviene no confundirlos:
+
+| Salto | Dato | Quién lo emite | Vida |
+|---|---|---|---|
+| 1. `POST /auth/ms/ticket-compras` | **Ticket de Entra ID** | el Worker, con su secreto | ~1 h |
+| 2. `obtener_store_id_key` (WinRT) | **Store ID key** | Microsoft Store (`GetCustomerPurchaseIdAsync`) | 30 días |
+| 3. `POST /auth/verify-purchase` | `purchase_token` = la Store ID key | la app | se canjea aquí |
+| 4. Consulta a la Collection API | **`order_id`** (= id de la suscripción) | Microsoft | toda la vida de la suscripción |
+
+Lo que se guarda como `purchase_token` en `usuario:<user_id>` **no es el paso 3**:
+es el `order_id` del paso 4. Por eso tiene forma `mdr:0:<…>:<…>` y no parece una
+Store ID key.
+
+Dos distinciones que se confunden y de las que depende que el historial sobreviva:
+
+- **Renovar no crea suscripción nueva.** Se renueva el mismo `id` y solo cambia
+  `expirationTime`. Mismo `order_id`, mismo `user_id`, historial intacto. Es lo
+  que pasó el 2026-10-16: la suscripción estaba caducada, se renovó y el
+  `purchase_token` almacenado no se movió.
+- **Cancelar y volver a contratar sí crea suscripción nueva**, con `id` nuevo. Ahí
+  el `user_id` cambia y el historial se recupera por el id de instalación, según
+  las reglas de `src/services/identidad.ts` de más arriba.
+
+Para el complemento de pago único (`premium_unlock`) el ancla es el `orderId` de
+la **colección**, que sí cambia en cada compra; el mismo mecanismo no aplica.
+
+El **id de instalación** viaja además como `publisherUserId` en el paso 2, de modo
+que Microsoft lo firma dentro de la Store ID key y el Worker lo recibe como
+`licencia.instalacion_declarada`. Ese es el enlace criptográfico entre la
+identidad de la Store y el `instalacion:<id>` de KV.
+
+Por qué la Store ID key no se puede reproducir en local: la firma la hace
+Microsoft y solo dentro de una app instalada desde la Store. En `tauri dev` no
+hay identidad de paquete, así que WinRT no la emite. La validación de licencia
+real solo es posible en el MSIX firmado; para probar el resto en local,
+`.dev.vars` con `ENTORNO=development` más un usuario sembrado en el KV.
+
 | Clave en KV | Contenido |
 |---|---|
 | `usuario:<user_id>` | Ficha completa: correo, plataforma, token, licencia |
