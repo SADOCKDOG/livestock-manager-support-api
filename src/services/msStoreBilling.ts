@@ -240,7 +240,14 @@ export function interpretarSuscripcion(
     // por Microsoft. Caducada no significa desconocida.
     compra_reconocida: true,
     // El id de la suscripcion es el ancla de identidad: lo firma Microsoft y no
-    // cambia en toda la vida de la suscripcion (una recompra crea uno nuevo).
+    // cambia en toda la vida de la suscripcion. Ojo con la distincion, que se
+    // confunde facil: RENOVAR no crea suscripcion nueva, asi que el `id` sigue
+    // igual y solo cambia `expirationTime` (comprar de nuevo una suscripcion
+    // caducada cae aqui y conserva el historial, que es lo correcto). Cancelar
+    // y volver a contratar SI crea otra suscripcion, con `id` nuevo, y ahi el
+    // historial se recupera por el id de instalacion (services/identidad.ts).
+    // Para el complemento de pago unico no aplica: ahi el ancla es el orderId de
+    // la coleccion, que si cambia en cada compra.
     order_id: item?.id ?? null,
     instalacion_declarada: instalacionDeclarada || null,
   };
