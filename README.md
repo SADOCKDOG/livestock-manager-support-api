@@ -155,9 +155,11 @@ En el repo de soporte dedicado: `Settings → Webhooks → Add webhook`
 | `POST` | `/tickets/:id/responder` | JWT | Mensaje del usuario en una incidencia abierta |
 | `POST` | `/tickets/:id/confirmar` | JWT | El usuario acepta la resolución y se cierra el issue |
 | `POST` | `/auth/verify-purchase` | No | Verifica la compra y devuelve el JWT de sesión. El campo `plataforma` decide contra quién: `android` → Google Play, `windows` → Microsoft Store |
-| `POST` | `/auth/ms/ticket` | No | Acuña el ticket de Entra ID que WinRT necesita para pedir la Store ID key. Abierta por necesidad (aún no hay sesión), limitada por IP: `429 LIMITE_TICKETS_MS` al superar `MAX_TICKETS_MS_POR_HORA` (30/hora por defecto) |
+| `POST` | `/auth/ms/ticket-compras` | No | Acuña el ticket de Entra ID que WinRT necesita para pedir la Store ID key. **Usar esta para `support_unlock`**: el soporte es una suscripción y se compra contra la audiencia de compras. Abierta por necesidad (aún no hay sesión), limitada por IP: `429 LIMITE_TICKETS_MS` al superar `MAX_TICKETS_MS_POR_HORA` (30/hora por defecto) |
+| `POST` | `/auth/ms/ticket` | No | Igual que la anterior pero con la audiencia de **colecciones**, no de compras. Reservada a consultas que no son de compra; **no** usarla para `support_unlock`, o el token valdrá contra la audiencia equivocada y WinRT fallará con `IDX10205` |
 | `GET` | `/auth/me` | JWT | Estado de la sesión y de la licencia |
 | `POST` | `/webhooks/github` | Firma HMAC | Etiquetas, comentarios y cierre del issue |
+| `GET` | `/` | No | Sonda de vida: devuelve `{servicio, ok}`. No forma parte de la API |
 
 Las rutas de lectura y de mensaje **no exigen licencia activa**, a propósito: quien
 ya abrió una incidencia puede seguir hablando de ella aunque su licencia caduque.

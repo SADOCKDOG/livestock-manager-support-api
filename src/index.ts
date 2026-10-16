@@ -6,13 +6,18 @@
  * no tiene nada que aprobar, solo lee y responde.
  *
  * Rutas:
- *   POST /auth/verify-purchase   verifica la compra y emite sesion
- *   GET  /auth/me                estado de la licencia
- *   POST /tickets                estructura el reporte (devuelve borrador)
- *   POST /tickets/confirm        crea el issue tras validarlo el usuario
- *   GET  /tickets                incidencias propias
- *   GET  /tickets/:id            detalle de una incidencia
- *   POST /webhooks/github        cambios de estado desde GitHub (HMAC)
+ *   POST /auth/verify-purchase    verifica la compra y emite sesion
+ *   GET  /auth/me                 estado de la licencia
+ *   POST /auth/ms/ticket-compras  ticket de Entra ID con audiencia de COMPRAS
+ *                                 (la que usa la compra de support_unlock)
+ *   POST /auth/ms/ticket          igual, pero audiencia de COLECCIONES
+ *   POST /tickets                 estructura el reporte (devuelve borrador)
+ *   POST /tickets/confirm         crea el issue tras validarlo el usuario
+ *   GET  /tickets                 incidencias propias
+ *   GET  /tickets/:id             detalle de una incidencia
+ *   POST /tickets/:id/responder   mensaje del usuario (puede disparar el agente)
+ *   POST /tickets/:id/confirmar   el usuario acepta la resolucion
+ *   POST /webhooks/github         cambios de estado desde GitHub (HMAC)
  */
 
 import { Hono } from 'hono';
