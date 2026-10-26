@@ -4,7 +4,7 @@ Backend de soporte con IA para Livestock Manager. Recibe incidencias desde la ap
 
 Repo independiente de `LIVESTOCK-MANAGER` y `livestock-desktop`: no comparte historial git ni build. El ciclo de vida completo de una incidencia está más abajo, en «Cómo funciona una incidencia».
 
-> **Disponibilidad:** el soporte con IA es un complemento opcional de Livestock Manager, con suscripción mensual renovable; la app funciona completa sin él. Cada usuario tiene un máximo diario de incidencias y de mensajes (`MAX_TICKETS_PER_DAY` y `MAX_MENSAJES_PER_DAY`). Este backend lo consumen la versión de Android 4.10.8, en prueba cerrada y aún no disponible para usuario final, y la versión de Windows nativa 4.11.15.
+> **Disponibilidad:** el soporte con IA es un complemento opcional de Livestock Manager, con suscripción mensual renovable; la app funciona completa sin él. Cada usuario tiene un máximo diario de incidencias y de mensajes (`MAX_TICKETS_PER_DAY` y `MAX_MENSAJES_PER_DAY`). Este backend lo consumen la versión de Android 4.10.8, en prueba cerrada y aún no disponible para usuario final, y la versión de Windows nativa 4.11.24.0.
 
 ## Stack
 
@@ -230,6 +230,37 @@ un identificador distinto y conviene no confundirlos:
 Lo que se guarda como `purchase_token` en `usuario:<user_id>` **no es el paso 3**:
 es el `order_id` del paso 4. Por eso tiene forma `mdr:0:<…>:<…>` y no parece una
 Store ID key.
+
+#### Quién es el comprador: la cuenta de la Store en ese equipo
+
+El paso 2 es el único donde aparece una persona, y es donde de verdad se decide
+todo lo demás. `GetCustomerPurchaseIdAsync` no recibe un identificador de
+comprador: la Store usa **la cuenta de Microsoft con sesión iniciada en el equipo
+donde corre la app**. La clave que devuelve es una credencial de *ese* comprador,
+no de quien escribió su correo en Ajustes.
+
+De ahí se siguen tres cosas, y ninguna tiene arreglo desde el backend:
+
+- Si en ese equipo **no hay ninguna cuenta** iniciada en la Store, la clave sale
+  vacía y la app no puede validar. Es el caso que ya contempla
+  `store_winrt.rs::obtener_clave` con su mensaje explícito ("Inicia sesion en la
+  Store con la cuenta que compro el soporte", líneas 164-172).
+- Si hay sesión iniciada pero **es otra cuenta** —la de otro equipo, la de otro
+  usuario, la que se haya añadido sin querer— la clave es de esa otra persona y
+  la consulta de suscripciones no devuelve el `support_unlock`. El resultado es
+  una licencia rechazada, no un error de red ni un fallo de compra.
+- El **correo de Ajustes no viaja nunca a Microsoft** en este camino: no entra en
+  la Store ID key ni se usa para elegir cuenta. Solo se envía a
+  `POST /auth/verify-purchase`, donde el Worker lo usa para indexar al usuario ya
+  verificado (`email:<correo>`). Por eso puede ser erróneo —incluso ficticio— sin
+  invalidar nada, y a la vez no sirve para recuperar una licencia.
+
+Matiz importante: **la Store no concede directamente la licencia**. Solo devuelve
+la clave (`Store ID key`); quien la concede o la deniega es el backend Worker al
+canjearla en `POST /auth/verify-purchase`. En una máquina compartida o en pruebas,
+hay que iniciar sesión en la Store con la cuenta que compró el soporte antes de
+esperar que la licencia valide. Cambiar el correo de la aplicación no cambia nada
+de esto.
 
 Dos distinciones que se confunden y de las que depende que el historial sobreviva:
 
