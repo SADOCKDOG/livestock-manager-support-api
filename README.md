@@ -215,17 +215,78 @@ inverso para encontrar al usuario. La licencia se ancla al `order_id`, de modo q
 un correo equivocado o ficticio no la invalida; comprobado en producción el
 2026-10-16.
 
-### Qué datos maneja una compra en Microsoft Store
+### Flujo de identidad (Mermaid)
 
-De la vista a la licencia en funcionamiento, en cuatro saltos. Cada uno lleva
-un identificador distinto y conviene no confundirlos:
+```mermaid
+flowchart TD
+    subgraph Entrada
+        A[App envía purchase_token o orderId]
+        B[Worker recibe POST /auth/verify-purchase]
+    end
 
-| Salto | Dato | Quién lo emite | Vida |
-|---|---|---|---|
-| 1. `POST /auth/ms/ticket-compras` | **Ticket de Entra ID** | el Worker, con su secreto | ~1 h |
-| 2. `obtener_store_id_key` (WinRT) | **Store ID key** | Microsoft Store (`GetCustomerPurchaseIdAsync`) | 30 días |
-| 3. `POST /auth/verify-purchase` | `purchase_token` = la Store ID key | la app | se canjea aquí |
-| 4. Consulta a la Collection API | **`order_id`** (= id de la suscripción) | Microsoft | toda la vida de la suscripción |
+    subgraph Resolución
+        C[resolverIdentidad(src/services/identidad.ts)]
+        D[lectura.obtenerUsuario(userIdDelToken)]
+        E[lectura.obtenerUsuarioPorInstalacion(instalacion)]
+        F[¿Existe identidad previa?]
+    end
+
+    subgraph Resultados
+        G[usuario-conocido: adoptar identidad, enlazar si libre]
+        H[instalación-nueva: crear nuevo vínculo]
+        I[enlace-de-otro-intacto: mantener enlace anterior]
+        J[misma-compra: reutilizar enlace previo]
+        K[recompra-encadenada: adopción por linkedPurchaseToken]
+        L[dos-licencias-vivas: rechazar, historial vacío]
+        M[comprobación-fallida: usuario nuevo, no reescribir instalación]
+        N[licencia-anterior-caducada: mantener enlace anterior]
+    end
+
+    A --> B
+    B --> C
+    C --> D
+    C --> E
+    C --> F
+    F -- Sí -- G
+    F -- No -- H
+    H -- Enlaza -- I
+    I -- Es propio -- J
+    I -- Otro usuario -- K
+    F -- No y enlazado vacío -- H
+    D -- Existente -- L
+    E -- No encontrada -- M
+    D -- Comprobar licencia anterior -- N
+```
+
+### Cómo funciona paso a paso
+
+1. **Compra Android:** El `user_id` se hashea del `purchase_token` (`SHA-256("usuario:" + purchaseToken)`). Si hay id de instalación, se indexa como `instalacion:<id> → user_id`.
+2. **Compra Windows:** El `user_id` se deriva del `order_id` (`hashUserIdWindows(licencia.order_id)`). El `purchase_token` en KV es el `orderId` (no el token de Digital Goods).
+3. **Recompra:** Cuando Google emite un `purchase_token` nuevo, el `user_id` cambia. El id de instalación permite reencontrar al usuario y adoptar la identidad anterior (`usuario-conocido`), preservando el historial.
+4. **Excepción crítica:** Si se reescribe `instalacion:<id>` apuntando al usuario nuevo y vacíoborrando el enlace, la pérdida es permanente: ni restaurar la copia de seguridad recupera el historial (`bug 2026-09-03`).
+5. **Email:** Índice inverso opcional (`email:<correo> → user_id`). No concede licencia ni decide el historial. En Windows, la cuenta de la Store con sesión en el equipo decide la compra, no el correo de Ajustes.
+
+### Reglas de adopción (identidad.ts)
+
+- Sin instalación → adoptar identidad sin enlazar.
+- Con instalación existente:
+  - Si está libre → enlazar.
+  - Si apunta a otro usuario → no reescribir (otro lo necesita para su historial).
+  - Si apunta al mismo usuario → mantener (no reescribir).
+  - Si apunta a otro y ese otro ya no existe → nuevo vínculo.
+- **Nunca reescribir `instalacion:<id>`** si apunta a otro usuario.
+- `tokenEncadenado`: si Google encadena la compra nueva con la anterior, es el mismo comprador (`recompra-encadenada`).
+- Si el token viejo está caducado → adoptar nueva identidad.
+- Si el token viejo sigue activo → rechazar (dos personas).
+- Verificar licencia anterior como último recurso.
+
+### Datos que se guardan en KV
+
+| Clave | Contenido |
+|---|---|
+| `usuario:<user_id>` | Ficha completa: correo, plataforma, token, licencia |
+| `instalacion:<id>` | `user_id` al que quedó vinculada esa instalación |
+| `email:<correo>` | `user_id`, solo si existe |
 
 Lo que se guarda como `purchase_token` en `usuario:<user_id>` **no es el paso 3**:
 es el `order_id` del paso 4. Por eso tiene forma `mdr:0:<…>:<…>` y no parece una
