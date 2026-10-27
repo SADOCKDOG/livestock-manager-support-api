@@ -1,7 +1,28 @@
+# Copia a .dev.vars y rellena. NO subas .dev.vars a git: lleva secretos reales.
+# En produccion van por `wrangler secret put`, nunca en [vars] de wrangler.toml.
+
 GITHUB_APP_ID=
 GITHUB_APP_PRIVATE_KEY=
 GITHUB_APP_INSTALLATION_ID=
 GITHUB_WEBHOOK_SECRET=
-AI_API_KEY=
 GOOGLE_PLAY_SERVICE_ACCOUNT_JSON=
 JWT_SECRET=
+
+# Entra ID, para la compra de Microsoft Store. Sin esto, las rutas /auth/ms/ticket
+# y /auth/ms/ticket-compras responden 501 MS_STORE_NO_CONFIGURADO y la compra del
+# complemento de soporte no se puede probar en local.
+MS_ENTRA_TENANT_ID=
+MS_ENTRA_CLIENT_ID=
+MS_ENTRA_CLIENT_SECRET=
+
+# Opcionales. No hace falta tocarlos para arrancar.
+#
+# ENTORNO=development omite por completo la verificacion de licencia
+# (src/middleware/auth.ts). Es una puerta trasera para probar en local: nunca
+# la actives en un entorno desplegado.
+# ENTORNO=
+#
+# Ya no se usa: el Worker llama a Workers AI con su propia identidad, asi que
+# no hay API key propia. La entrada se conserva marcada en src/types.ts por
+# historico.
+# AI_API_KEY=

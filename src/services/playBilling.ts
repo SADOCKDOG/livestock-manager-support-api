@@ -117,6 +117,14 @@ export interface ResultadoLicencia {
    */
   token_anterior: string | null;
   /**
+   * Google reconoce la compra aunque ya no sea vigente: la suscripcion caduca o
+   * se cancela, pero el token sigue siendo real. Es lo que distingue a quien
+   * compro de quien manda un token inventado, y por tanto lo que autoriza a
+   * actualizar el correo de contacto con `licencia_soporte_activa = false`.
+   * False solo cuando Google responde 404: ese token no existio nunca.
+   */
+  compra_reconocida: boolean;
+  /**
    * Solo en suscripciones. true = Google cobrara de nuevo en `expira`; false =
    * el usuario la ha cancelado y `expira` es la fecha en que pierde el acceso.
    * Sin este dato la app tendria que ensenar la misma frase en los dos casos,
@@ -151,6 +159,7 @@ export async function verificarLicenciaAndroid(
       es_suscripcion: SOPORTE_ES_SUSCRIPCION,
       renovacion_automatica: null,
       token_anterior: null,
+      compra_reconocida: false,
     };
   }
   if (!respuesta.ok) {
@@ -181,6 +190,8 @@ export async function verificarLicenciaAndroid(
       // si viene explicitamente en false, no si falta.
       renovacion_automatica: sub.autoRenewing === undefined ? null : sub.autoRenewing,
       token_anterior: sub.linkedPurchaseToken ?? null,
+      // Google ha devuelto la suscripcion: existe, caduque o no.
+      compra_reconocida: true,
     };
   }
 
@@ -199,5 +210,6 @@ export async function verificarLicenciaAndroid(
     renovacion_automatica: null,
     // La compra unica no sustituye a ninguna otra: no hay token encadenado.
     token_anterior: null,
+    compra_reconocida: true,
   };
 }

@@ -4,7 +4,7 @@ Backend de soporte con IA para Livestock Manager. Recibe incidencias desde la ap
 
 Repo independiente de `LIVESTOCK-MANAGER` y `livestock-desktop`: no comparte historial git ni build. El ciclo de vida completo de una incidencia está más abajo, en «Cómo funciona una incidencia».
 
-> **Disponibilidad:** el soporte con IA es un complemento opcional de Livestock Manager, con suscripción mensual renovable; la app funciona completa sin él. Cada usuario tiene un máximo diario de incidencias y de mensajes (`MAX_TICKETS_PER_DAY` y `MAX_MENSAJES_PER_DAY`). Este backend lo consumen la versión de Android 4.10.8, en prueba cerrada y aún no disponible para usuario final, y la versión de Windows nativa 4.11.15.
+> **Disponibilidad:** el soporte con IA es un complemento opcional de Livestock Manager, con suscripción mensual renovable; la app funciona completa sin él. Cada usuario tiene un máximo diario de incidencias y de mensajes (`MAX_TICKETS_PER_DAY` y `MAX_MENSAJES_PER_DAY`). Este backend lo consumen la versión de Android 4.10.8, en prueba cerrada y aún no disponible para usuario final, y la versión de Windows nativa 4.11.24.0.
 
 ## Stack
 
@@ -155,9 +155,11 @@ En el repo de soporte dedicado: `Settings → Webhooks → Add webhook`
 | `POST` | `/tickets/:id/responder` | JWT | Mensaje del usuario en una incidencia abierta |
 | `POST` | `/tickets/:id/confirmar` | JWT | El usuario acepta la resolución y se cierra el issue |
 | `POST` | `/auth/verify-purchase` | No | Verifica la compra y devuelve el JWT de sesión. El campo `plataforma` decide contra quién: `android` → Google Play, `windows` → Microsoft Store |
-| `POST` | `/auth/ms/ticket` | No | Acuña el ticket de Entra ID que WinRT necesita para pedir la Store ID key. Abierta por necesidad (aún no hay sesión), limitada por IP: `429 LIMITE_TICKETS_MS` al superar `MAX_TICKETS_MS_POR_HORA` (30/hora por defecto) |
+| `POST` | `/auth/ms/ticket-compras` | No | Acuña el ticket de Entra ID que WinRT necesita para pedir la Store ID key. **Usar esta para `support_unlock`**: el soporte es una suscripción y se compra contra la audiencia de compras. Abierta por necesidad (aún no hay sesión), limitada por IP: `429 LIMITE_TICKETS_MS` al superar `MAX_TICKETS_MS_POR_HORA` (30/hora por defecto) |
+| `POST` | `/auth/ms/ticket` | No | Igual que la anterior pero con la audiencia de **colecciones**, no de compras. Reservada a consultas que no son de compra; **no** usarla para `support_unlock`, o el token valdrá contra la audiencia equivocada y WinRT fallará con `IDX10205` |
 | `GET` | `/auth/me` | JWT | Estado de la sesión y de la licencia |
 | `POST` | `/webhooks/github` | Firma HMAC | Etiquetas, comentarios y cierre del issue |
+| `GET` | `/` | No | Sonda de vida: devuelve `{servicio, ok}`. No forma parte de la API |
 
 Las rutas de lectura y de mensaje **no exigen licencia activa**, a propósito: quien
 ya abrió una incidencia puede seguir hablando de ella aunque su licencia caduque.
@@ -207,6 +209,82 @@ usuario ya conocido tampoco se queda con el enlace si apunta a otro.
 El `email` es opcional y solo sirve de último recurso manual. Se indexa como
 `email:<correo> → user_id` **solo si existe**; sin ese guardia todos los
 usuarios sin correo compartían la clave `email:` y el último se la llevaba.
+
+**El correo no concede licencia ni decide el historial.** Solo es un índice
+inverso para encontrar al usuario. La licencia se ancla al `order_id`, de modo que
+un correo equivocado o ficticio no la invalida; comprobado en producción el
+2026-10-16.
+
+### Qué datos maneja una compra en Microsoft Store
+
+De la vista a la licencia en funcionamiento, en cuatro saltos. Cada uno lleva
+un identificador distinto y conviene no confundirlos:
+
+| Salto | Dato | Quién lo emite | Vida |
+|---|---|---|---|
+| 1. `POST /auth/ms/ticket-compras` | **Ticket de Entra ID** | el Worker, con su secreto | ~1 h |
+| 2. `obtener_store_id_key` (WinRT) | **Store ID key** | Microsoft Store (`GetCustomerPurchaseIdAsync`) | 30 días |
+| 3. `POST /auth/verify-purchase` | `purchase_token` = la Store ID key | la app | se canjea aquí |
+| 4. Consulta a la Collection API | **`order_id`** (= id de la suscripción) | Microsoft | toda la vida de la suscripción |
+
+Lo que se guarda como `purchase_token` en `usuario:<user_id>` **no es el paso 3**:
+es el `order_id` del paso 4. Por eso tiene forma `mdr:0:<…>:<…>` y no parece una
+Store ID key.
+
+#### Quién es el comprador: la cuenta de la Store en ese equipo
+
+El paso 2 es el único donde aparece una persona, y es donde de verdad se decide
+todo lo demás. `GetCustomerPurchaseIdAsync` no recibe un identificador de
+comprador: la Store usa **la cuenta de Microsoft con sesión iniciada en el equipo
+donde corre la app**. La clave que devuelve es una credencial de *ese* comprador,
+no de quien escribió su correo en Ajustes.
+
+De ahí se siguen tres cosas, y ninguna tiene arreglo desde el backend:
+
+- Si en ese equipo **no hay ninguna cuenta** iniciada en la Store, la clave sale
+  vacía y la app no puede validar. Es el caso que ya contempla
+  `store_winrt.rs::obtener_clave` con su mensaje explícito ("Inicia sesion en la
+  Store con la cuenta que compro el soporte", líneas 164-172).
+- Si hay sesión iniciada pero **es otra cuenta** —la de otro equipo, la de otro
+  usuario, la que se haya añadido sin querer— la clave es de esa otra persona y
+  la consulta de suscripciones no devuelve el `support_unlock`. El resultado es
+  una licencia rechazada, no un error de red ni un fallo de compra.
+- El **correo de Ajustes no viaja nunca a Microsoft** en este camino: no entra en
+  la Store ID key ni se usa para elegir cuenta. Solo se envía a
+  `POST /auth/verify-purchase`, donde el Worker lo usa para indexar al usuario ya
+  verificado (`email:<correo>`). Por eso puede ser erróneo —incluso ficticio— sin
+  invalidar nada, y a la vez no sirve para recuperar una licencia.
+
+Matiz importante: **la Store no concede directamente la licencia**. Solo devuelve
+la clave (`Store ID key`); quien la concede o la deniega es el backend Worker al
+canjearla en `POST /auth/verify-purchase`. En una máquina compartida o en pruebas,
+hay que iniciar sesión en la Store con la cuenta que compró el soporte antes de
+esperar que la licencia valide. Cambiar el correo de la aplicación no cambia nada
+de esto.
+
+Dos distinciones que se confunden y de las que depende que el historial sobreviva:
+
+- **Renovar no crea suscripción nueva.** Se renueva el mismo `id` y solo cambia
+  `expirationTime`. Mismo `order_id`, mismo `user_id`, historial intacto. Es lo
+  que pasó el 2026-10-16: la suscripción estaba caducada, se renovó y el
+  `purchase_token` almacenado no se movió.
+- **Cancelar y volver a contratar sí crea suscripción nueva**, con `id` nuevo. Ahí
+  el `user_id` cambia y el historial se recupera por el id de instalación, según
+  las reglas de `src/services/identidad.ts` de más arriba.
+
+Para el complemento de pago único (`premium_unlock`) el ancla es el `orderId` de
+la **colección**, que sí cambia en cada compra; el mismo mecanismo no aplica.
+
+El **id de instalación** viaja además como `publisherUserId` en el paso 2, de modo
+que Microsoft lo firma dentro de la Store ID key y el Worker lo recibe como
+`licencia.instalacion_declarada`. Ese es el enlace criptográfico entre la
+identidad de la Store y el `instalacion:<id>` de KV.
+
+Por qué la Store ID key no se puede reproducir en local: la firma la hace
+Microsoft y solo dentro de una app instalada desde la Store. En `tauri dev` no
+hay identidad de paquete, así que WinRT no la emite. La validación de licencia
+real solo es posible en el MSIX firmado; para probar el resto en local,
+`.dev.vars` con `ENTORNO=development` más un usuario sembrado en el KV.
 
 | Clave en KV | Contenido |
 |---|---|
