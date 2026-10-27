@@ -36,6 +36,7 @@ Reglas:
 - No inventes datos que el usuario no haya dado. Si algo falta, omitelo.
 - No propongas cambios de codigo, parches ni nombres de fichero.
 - La severidad es "alta" solo si hay perdida de datos o la app no se puede usar.
+- Los pasos de reproduccion deben ser concretos y accionables: pasos que el usuario puede seguir desde cero en su propia app para provocar el problema. NO dejes la lista vacia si es posible; incluye al menos el flujo general.
 
 Formato exacto:
 {
@@ -163,12 +164,20 @@ export async function estructurarReporte(
     `- Dispositivo: ${contexto.dispositivo ?? 'desconocido'}`,
   ].join('\n');
 
-  let bruto: Record<string, unknown>;
-  try {
-    bruto = extraerJSON(await llamarProveedor(ai, mensaje, INSTRUCCIONES, 'estructuracion'));
-  } catch (e) {
-    console.warn('[ai] fallo la estructuracion, se usa el borrador de reserva:', detalleError(e));
-    return borradorDeReserva(ticketId, descripcionUsuario);
+  let bruto: Record<string, unknown> = {};
+  let intentos = 0;
+  while (intentos < 2) {
+    try {
+      bruto = extraerJSON(await llamarProveedor(ai, mensaje, INSTRUCCIONES, 'estructuracion'));
+      break;
+    } catch (e) {
+      intentos++;
+      if (intentos >= 2) {
+        console.warn('[ai] fallo la estructuracion tras 2 intentos, se usa el borrador de reserva:', detalleError(e));
+        return borradorDeReserva(ticketId, descripcionUsuario);
+      }
+      console.warn('[ai] reintentando estructuracion (intento ' + (intentos + 1) + '/2):', detalleError(e));
+    }
   }
 
   const severidad = SEVERIDADES.includes(bruto.severidad as Severidad)
@@ -334,19 +343,27 @@ export async function redactarRespuestaSeguimiento(
     'HILO',
   ].join('\n');
 
-  let bruto: Record<string, unknown>;
-  try {
-    bruto = extraerJSON(
-      await llamarProveedor(
-        ai,
-        mensaje,
-        compilarInstrucciones(INSTRUCCIONES_SEGUIMIENTO, mensaje),
-        'seguimiento',
-      ),
-    );
-  } catch (e) {
-    console.warn('[ai] no se pudo redactar la respuesta de seguimiento:', detalleError(e));
-    return { texto: null, resuelta: false };
+  let bruto: Record<string, unknown> = {};
+  let intentos = 0;
+  while (intentos < 2) {
+    try {
+      bruto = extraerJSON(
+        await llamarProveedor(
+          ai,
+          mensaje,
+          compilarInstrucciones(INSTRUCCIONES_SEGUIMIENTO, mensaje),
+          'seguimiento',
+        ),
+      );
+      break;
+    } catch (e) {
+      intentos++;
+      if (intentos >= 2) {
+        console.warn('[ai] no se pudo redactar la respuesta de seguimiento tras 2 intentos:', detalleError(e));
+        return { texto: null, resuelta: false };
+      }
+      console.warn('[ai] reintentando respuesta de seguimiento (intento ' + (intentos + 1) + '/2):', detalleError(e));
+    }
   }
 
   const resumen = limpiarTexto(bruto.resumen, LIMITES.causa);
@@ -402,19 +419,27 @@ export async function redactarRespuestaInicial(
     `- Dispositivo: ${contexto.dispositivo ?? 'desconocido'}`,
   ].join('\n');
 
-  let bruto: Record<string, unknown>;
-  try {
-    bruto = extraerJSON(
-      await llamarProveedor(
-        ai,
-        mensaje,
-        compilarInstrucciones(INSTRUCCIONES_RESPUESTA, mensaje),
-        'respuesta-inicial',
-      ),
-    );
-  } catch (e) {
-    console.warn('[ai] no se pudo redactar la respuesta inicial:', detalleError(e));
-    return null;
+  let bruto: Record<string, unknown> = {};
+  let intentos = 0;
+  while (intentos < 2) {
+    try {
+      bruto = extraerJSON(
+        await llamarProveedor(
+          ai,
+          mensaje,
+          compilarInstrucciones(INSTRUCCIONES_RESPUESTA, mensaje),
+          'respuesta-inicial',
+        ),
+      );
+      break;
+    } catch (e) {
+      intentos++;
+      if (intentos >= 2) {
+        console.warn('[ai] no se pudo redactar la respuesta inicial tras 2 intentos:', detalleError(e));
+        return null;
+      }
+      console.warn('[ai] reintentando respuesta inicial (intento ' + (intentos + 1) + '/2):', detalleError(e));
+    }
   }
 
   const resumen = limpiarTexto(bruto.resumen, LIMITES.causa);

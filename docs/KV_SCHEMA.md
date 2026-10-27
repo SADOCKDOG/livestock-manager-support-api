@@ -78,9 +78,9 @@ interface BorradorTicket {
 
 | Clave | Valor | TTL | Descripción |
 |---|---|---|---|
-| `ratelimit:<user_id>:<dia>` | contador (texto) | 172800 s (48 h) | Tickets creados hoy por usuario (UTC) |
+| `ratelimit:<user_id>:<dia>` | contador (texto) | 93600 s (26 h) | Tickets creados hoy por usuario (UTC) |
 | `ratelimit:msticket:<ip>:<hora>` | contador (texto) | 10800 s (3 h) | Acunados de clave Microsoft Store por IP y hora (anónimo) |
-| `msgs:<user_id>:<dia>` | contador (texto) | 172800 s (48 h) | Mensajes del usuario en tickets abiertos hoy (UTC) |
+| `msgs:<user_id>:<dia>` | contador (texto) | 93600 s (26 h) | Mensajes del usuario en tickets abiertos hoy (UTC) |
 
 ### Cupos (valores por defecto en código)
 
