@@ -1,6 +1,28 @@
-# Copia a .dev.vars y rellena. NO subas .dev.vars a git: lleva secretos reales.
-# En produccion van por `wrangler secret put`, nunca en [vars] de wrangler.toml.
-
+# .dev.vars — Template para `wrangler dev` LOCAL.
+#
+# REGLAS:
+# 1. Ejecuta `cp .dev.vars.example .dev.vars` para empezar.
+# 2. Rellena los valores que falten. NINGUNO DE ELLOS SE SUBIRA A GIT.
+# 3. .dev.vars NO ESTA EN .gitignore — es obligatorio protegerlo.
+# 4. En producción, todos van por `wrangler secret put`, NO por vars.
+#
+# 🔑 Donde conseguir los valores de Entra ID (obligatorio para probar Windows local):
+#   https://learn.microsoft.com/entra/identity/develop/quickstart-personal-credentials
+#   1. Ve a Entra ID → Aplicaciones enterprise → Tu app → Certificados y secretos
+# 2. Genera un nuevo secreto -> Client secret -> Copia el valor
+# 3. El Tenant ID está en Propiedades → Directory ID
+# 4. El Client ID está en Propiedades → Application (client) ID
+# 5. Copia los 3 valores arriba a los campos MS_ENTRA_TENANT_ID, MS_ENTRA_CLIENT_ID,
+#    MS_ENTRA_CLIENT_SECRET abajo.
+#
+# ⚠️ Requisitos contrastados contra .dev.vars
+# - MS_ENTRA_TENANT_ID: Obligatorio para /auth/ms/ticket* en local
+# - MS_ENTRA_CLIENT_ID: Obligatorio para /auth/ms/ticket* en local
+# - MS_ENTRA_CLIENT_SECRET: Obligatorio para /auth/ms/ticket* en local
+# - MAX_TICKETS_MS_POR_HORA: Opcional, default en código es '30' (línea auth.ts:386)
+# - Los GITHUB_APP_* son opcionales, solo para probar ciclo de incidencias sin vistas
+# - GOOGLE_PLAY_SERVICE_ACCOUNT_JSON es opcional, solo para Android testing local
+#
 GITHUB_APP_ID=
 GITHUB_APP_PRIVATE_KEY=
 GITHUB_APP_INSTALLATION_ID=
@@ -8,21 +30,22 @@ GITHUB_WEBHOOK_SECRET=
 GOOGLE_PLAY_SERVICE_ACCOUNT_JSON=
 JWT_SECRET=
 
-# Entra ID, para la compra de Microsoft Store. Sin esto, las rutas /auth/ms/ticket
-# y /auth/ms/ticket-compras responden 501 MS_STORE_NO_CONFIGURADO y la compra del
-# complemento de soporte no se puede probar en local.
+## Entra ID (para /auth/ms/ticket* y la compra del complemento de soporte en Windows local)
+# Rellena estos 3 campos usando la guía de arriba. Sin ellos, las rutas /auth/ms/ticket*
+# y /auth/ms/ticket-compras responderán 501 MS_STORE_NO_CONFIGURADO en local.
 MS_ENTRA_TENANT_ID=
 MS_ENTRA_CLIENT_ID=
 MS_ENTRA_CLIENT_SECRET=
 
-# Opcionales. No hace falta tocarlos para arrancar.
-#
-# ENTORNO=development omite por completo la verificacion de licencia
-# (src/middleware/auth.ts). Es una puerta trasera para probar en local: nunca
-# la actives en un entorno desplegado.
-# ENTORNO=
-#
-# Ya no se usa: el Worker llama a Workers AI con su propia identidad, asi que
+## Opcional. No tocar si luego escribes src/routes/auth.ts y quieres añadir límite por hora.
+## Default en código: MAX_TICKETS_MS_POR_HORA = '30' en /auth/ms/ticket-compras (línea 386).
+## MAX_TICKETS_MS_POR_HORA=
+
+## Entorno. development omite licencia en /auth/verify-purchase y sirve como puerta trasera
+# (src/middleware/auth.ts). Nunca actives en entornos desplegados.
+ENTORNO=development
+
+## Ya no se usa: el Worker llama a Workers AI con su propia identidad, asi que
 # no hay API key propia. La entrada se conserva marcada en src/types.ts por
 # historico.
 # AI_API_KEY=
