@@ -447,6 +447,8 @@ El backend de soporte técnico con IA se desarrolla dentro de la **Sdog Farm Sof
 - **Gobernanza conceptual de Factory (no comportamiento de este API):** el modelo previsto para autorizar merges de Pull Requests separa Owner (FIDO) → App Exec → GitHub merge, con el DOI como intermediario de desarrollo aún previsto. Esto no describe la identidad ni el comportamiento de la GitHub App de soporte de este repositorio: su función es gestionar incidencias/issues y sus permisos se limitan a `Issues: Read & Write`; no ejecuta merges de PR ni actúa como DOI/App Exec.
 - Fuentes de verdad del diseño: `docs/OWNER_AUTHORIZATION.md`, `docs/security/DEV_OPERATIONS_INTERMEDIARY.md` y `docs/specifications/doi/` del repositorio Factory.
 
+**Estado explícito:** diseño documentado; integración del desarrollo pendiente de revisión; validación operativa pendiente. En la base revisada de Console (`c67d62ab12103752071f9fbfa2b317ae3d470062`), la aprobación local puede marcar una tarea `DONE` y la promoción contempla merge y sincronización/limpieza sin estar protegidos por el flujo FIDO/DOI documentado. Esta PR es solo documental: no implementa ni corrige ese gap ni valida la seguridad de Console.
+
 > **Estado de capacidades (fase D2-C, documentación):** este cambio es exclusivamente de documentación. No constituye DOI operativo, activación de Apps, credenciales, permisos, autorización operativa del propietario ni capacidad operativa de integración. El estado operativo del proyecto se reporta en «Estado del proyecto».
 
 ---
