@@ -439,6 +439,21 @@ no debe impedirte reportar un fallo nuevo.
 - Las etiquetas `estado:*` las crea GitHub sola al asignarlas, pero conviene
   tenerlas creadas en el repo de soporte para que salgan con color en el tablero.
 
+## Gobernanza con la Factoría (Software Factory) y Autorización de Propietario
+
+El backend de soporte técnico con IA se desarrolla dentro de la **Sdog Farm Software Factory** (`SADOCKDOG/Autonomous-AI-Dev-Infrastructure`), que actúa como fuente de verdad para gobernanza, identidades y operaciones de desarrollo:
+
+- La orquestación multiagente, la máquina de estados y la barrera de firma humana auditada corresponden al repositorio Factory.
+- **Gobernanza conceptual de Factory (no comportamiento de este API):** el modelo previsto para autorizar merges de Pull Requests separa Owner (FIDO) → App Exec → GitHub merge, con el DOI como intermediario de desarrollo aún previsto. Esto no describe la identidad ni el comportamiento de la GitHub App de soporte: este backend gestiona incidencias/issues y no ejecuta merges de PR ni actúa como DOI/App Exec (`src/types.ts`, `src/services/github.ts`).
+- **Permisos de la GitHub App:** el apartado «Stack» y «Configuración inicial → Crear la GitHub App» de este README describen `Issues: Read & Write`, mientras que un comentario en `src/services/github.ts` prescribe `Issues: write` únicamente. No hay en el repositorio un manifiesto de la App ni evidencia de sus permisos actualmente instalados; por tanto, el conjunto real de permisos queda **no verificado**.
+- Fuentes de verdad del diseño: `docs/OWNER_AUTHORIZATION.md`, `docs/security/DEV_OPERATIONS_INTERMEDIARY.md` y `docs/specifications/doi/` del repositorio Factory.
+
+**Estado:** Owner Authorization/DOI es diseño documentado; integración del desarrollo pendiente de revisión; validación operativa pendiente. Esta PR es solo documental: no implementa ni corrige capacidades ni valida la seguridad de Console. El gap de comportamiento específico está documentado en [Console #1](https://github.com/SADOCKDOG/Console-AI-Dev-Infrastructure/pull/1).
+
+> **Estado de capacidades (fase D2-C, documentación):** este cambio es exclusivamente de documentación. No constituye DOI operativo, activación de Apps, credenciales, permisos, autorización operativa del propietario ni capacidad operativa de integración. El estado operativo del proyecto se reporta en «Estado del proyecto».
+
+---
+
 ## Estado del proyecto
 
 ✅ **En producción.** Ciclo completo verificado de punta a punta: creación,
@@ -453,6 +468,5 @@ código).
 ## Licencia
 
 Todos los derechos reservados. La aplicación Livestock Manager puede usarse gratuitamente según las condiciones de la Microsoft Store; el código de este backend no se distribuye bajo licencia de código abierto.
-
 
 
