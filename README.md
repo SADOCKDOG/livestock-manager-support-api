@@ -439,6 +439,18 @@ no debe impedirte reportar un fallo nuevo.
 - Las etiquetas `estado:*` las crea GitHub sola al asignarlas, pero conviene
   tenerlas creadas en el repo de soporte para que salgan con color en el tablero.
 
+## Gobernanza con la Factoría (Software Factory) y Autorización de Propietario
+
+El backend de soporte técnico con IA se desarrolla dentro de la **Sdog Farm Software Factory** (`SADOCKDOG/Autonomous-AI-Dev-Infrastructure`), que actúa como fuente de verdad para gobernanza, identidades y operaciones de desarrollo:
+
+- La orquestación multiagente, la máquina de estados y la barrera de firma humana auditada corresponden al repositorio Factory.
+- La autorización de integración de Pull Requests sigue la separación de identidades **Owner (FIDO) → App Exec → GitHub merge**, con el Dev Operations Intermediary (DOI) previsto como canal de intermediación.
+- Fuentes de verdad del diseño: `docs/OWNER_AUTHORIZATION.md`, `docs/security/DEV_OPERATIONS_INTERMEDIARY.md` y `docs/specifications/doi/` del repositorio Factory.
+
+> **Estado de capacidades (fase D2-C, documentación):** este cambio es exclusivamente de documentación. No constituye DOI operativo, activación de Apps, credenciales, permisos, autorización operativa del propietario ni capacidad operativa de integración. El estado operativo del proyecto se reporta en «Estado del proyecto».
+
+---
+
 ## Estado del proyecto
 
 ✅ **En producción.** Ciclo completo verificado de punta a punta: creación,
